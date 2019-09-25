@@ -9,8 +9,8 @@ import random
 import collections
 
 # There are 13 integer features and 26 categorical features
-continous_features = range(1, 14)
-categorial_features = range(14, 40)
+continous_features = range(0, 13)
+categorial_features = range(13, 39)
 
 # Clip integer features. The clip point for each integer feature
 # is derived from the 95% quantile of the total values in each feature
@@ -31,13 +31,13 @@ class CategoryDictGenerator:
     def build(self, datafile, categorial_features, cutoff=0):
         with open(datafile, 'r') as f:
             for line in f:
-                features = line.rstrip('\n').split('\t')
+                data_fields = line.rstrip('\n').split('\t')
+                features = data_fields[1:]
                 for i in range(0, self.num_feature):
                     if features[categorial_features[i]] != '':
                         self.dicts[i][features[categorial_features[i]]] += 1
         for i in range(0, self.num_feature):
-            self.dicts[i] = filter(lambda x: x[1] >= cutoff,
-                                   self.dicts[i].items())
+            self.dicts[i] = filter(lambda x: x[1] >= cutoff, self.dicts[i].items())
             self.dicts[i] = sorted(self.dicts[i], key=lambda x: (-x[1], x[0]))
             vocabs, _ = list(zip(*self.dicts[i]))
             self.dicts[i] = dict(zip(vocabs, range(1, len(vocabs) + 1)))
@@ -61,49 +61,56 @@ class ContinuousFeatureGenerator:
 
     def __init__(self, num_feature):
         self.num_feature = num_feature
+        self.min_val = [99999] * num_feature
+        self.max_val = [-99999] * num_feature
 
     def build(self, datafile, continous_features):
         with open(datafile, 'r') as f:
             for line in f:
-                features = line.rstrip('\n').split('\t')
+                data_fields = line.rstrip('\n').split('\t')
+                features = data_fields[1:]
                 for i in range(0, self.num_feature):
                     val = features[continous_features[i]]
                     if val != '':
                         val = int(val)
                         if val > continous_clip[i]:
                             val = continous_clip[i]
+                        if self.min_val[i] > val:
+                            self.min_val[i] = val
+                        if self.max_val[i] < val:
+                            self.max_val[i] = val
 
     def gen(self, idx, val):
         if val == '':
             return 0.0
-        val = float(val)
+        eps = 1e-6
+        min_v = self.min_val[idx]
+        max_v = self.max_val[idx]
+        val = (float(val) - min_v) / (max_v - min_v + eps)
         return val
 
 
 # @click.command("preprocess")
 # @click.option("--datadir", type=str, help="Path to raw criteo dataset")
 # @click.option("--outdir", type=str, help="Path to save the processed data")
-def preprocess(datadir, outdir):
+def preprocess(datadir, outdir, train_file='train.txt', test_file='test_file', feature_sizes_file = 'feature_sizes.txt', cutoff=200):
     """
     All the 13 integer features are normalzied to continous values and these
     continous features are combined into one vecotr with dimension 13.
     Each of the 26 categorical features are one-hot encoded and all the one-hot
     vectors are combined into one sparse binary vector.
     """
+
+    print("building dictionary....")
     dists = ContinuousFeatureGenerator(len(continous_features))
-    dists.build(os.path.join(datadir, 'train.txt'), continous_features)
+    dists.build(os.path.join(datadir, train_file), continous_features)
 
     dicts = CategoryDictGenerator(len(categorial_features))
-    dicts.build(
-        os.path.join(datadir, 'train.txt'), categorial_features, cutoff=200)
+    dicts.build(os.path.join(datadir, train_file), categorial_features, cutoff=cutoff)
 
     dict_sizes = dicts.dicts_sizes()
-    categorial_feature_offset = [0]
-    for i in range(1, len(categorial_features)):
-        offset = categorial_feature_offset[i - 1] + dict_sizes[i - 1]
-        categorial_feature_offset.append(offset)
 
-    with open(os.path.join(outdir, 'feature_sizes.txt'), 'w') as feature_sizes:
+    with open(os.path.join(outdir, feature_sizes_file), 'w') as feature_sizes:
         sizes = [1] * len(continous_features) + dict_sizes
         sizes = [str(i) for i in sizes]
         feature_sizes.write(','.join(sizes))
@@ -111,42 +118,41 @@ def preprocess(datadir, outdir):
     random.seed(0)
 
     # Saving the data used for training.
-    with open(os.path.join(outdir, 'train.txt'), 'w') as out_train:
-        with open(os.path.join(datadir, 'train.txt'), 'r') as f:
+    print("transforming {}".format(train_file))
+    with open(os.path.join(outdir, train_file), 'w') as out_train:
+        with open(os.path.join(datadir, train_file), 'r') as f:
+            for line in f:
+                data_fields = line.rstrip('\n').split('\t')
+                label = data_fields[0]
+                features = data_fields[1:]
+
+                continous_vals = []
+                for i in range(0, len(continous_features)):
+                    val = dists.gen(i, features[continous_features[i]])
+                    continous_vals.append("{0:.6f}".format(val).rstrip('0').rstrip('.'))
+                categorial_vals = []
+                for i in range(0, len(categorial_features)):
+                    val = dicts.gen(i, features[categorial_features[i]])
+                    categorial_vals.append(str(val))
+
+                continous_vals = ','.join(continous_vals)
+                categorial_vals = ','.join(categorial_vals)
+                out_train.write(','.join([continous_vals, categorial_vals, label]) + '\n')
+                    
+
+    print("transforming {}".format(test_file))
+    with open(os.path.join(outdir, test_file), 'w') as out:
+        with open(os.path.join(datadir, test_file), 'r') as f:
             for line in f:
                 features = line.rstrip('\n').split('\t')
 
                 continous_vals = []
                 for i in range(0, len(continous_features)):
                     val = dists.gen(i, features[continous_features[i]])
-                    continous_vals.append("{0:.6f}".format(val).rstrip('0')
-                                            .rstrip('.'))
+                    continous_vals.append("{0:.6f}".format(val).rstrip('0').rstrip('.'))
                 categorial_vals = []
                 for i in range(0, len(categorial_features)):
-                    val = dicts.gen(i, features[categorial_features[
-                        i]]) + categorial_feature_offset[i]
-                    categorial_vals.append(str(val))
-
-                continous_vals = ','.join(continous_vals)
-                categorial_vals = ','.join(categorial_vals)
-                label = features[0]
-                out_train.write(','.join([continous_vals, categorial_vals, label]) + '\n')
-                    
-
-    with open(os.path.join(outdir, 'test.txt'), 'w') as out:
-        with open(os.path.join(datadir, 'test.txt'), 'r') as f:
-            for line in f:
-                features = line.rstrip('\n').split('\t')
-
-                continous_vals = []
-                for i in range(0, len(continous_features)):
-                    val = dists.gen(i, features[continous_features[i] - 1])
-                    continous_vals.append("{0:.6f}".format(val).rstrip('0')
-                                          .rstrip('.'))
-                categorial_vals = []
-                for i in range(0, len(categorial_features)):
-                    val = dicts.gen(i, features[categorial_features[
-                        i] - 1]) + categorial_feature_offset[i]
+                    val = dicts.gen(i, features[categorial_features[i]])
                     categorial_vals.append(str(val))
 
                 continous_vals = ','.join(continous_vals)
@@ -154,4 +160,5 @@ def preprocess(datadir, outdir):
                 out.write(','.join([continous_vals, categorial_vals]) + '\n')
 
 if __name__ == "__main__":
-    preprocess('../data/raw', '../data')
+    #preprocess('./data/raw', './data', train_file='train_large.txt', test_file='test_large.txt', feature_sizes_file="feature_sizes_large.txt")
+    preprocess('./data/raw', './data', train_file='train.txt', test_file='test.txt', feature_sizes_file = 'feature_sizes.txt',  cutoff=0)
