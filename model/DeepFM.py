@@ -175,7 +175,7 @@ class DeepFM(nn.Module):
                 total = model(xi, xv)
                 reg = self.l1_reg().to(device=self.device, dtype=torch.float32)
                 err = criterion(total, y)
-                loss = err + 1e-6*reg
+                loss = err + 1e-8*reg
                 if not torch.isnan(loss):
                     optimizer.zero_grad()
                     loss.backward()
