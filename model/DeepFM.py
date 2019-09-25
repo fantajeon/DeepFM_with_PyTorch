@@ -30,7 +30,7 @@ class DeepFM(nn.Module):
                  hidden_dims=[200,200,200],
                  dropout=[0.5, 0.5, 0.5], 
                  
-                 use_cuda=True, verbose=False):
+                 use_cuda=True, verbose=False, overfitting=False):
         """
         Initialize a new network
 
@@ -48,6 +48,7 @@ class DeepFM(nn.Module):
         self.embedding_size = embedding_size
         self.hidden_dims = hidden_dims
         self.dtype = torch.long
+        self.overfitting = overfitting
         #self.bias = torch.nn.Parameter(torch.zeros(1, dtype=torch.float32))
         """
             check if use cuda
@@ -119,7 +120,8 @@ class DeepFM(nn.Module):
         for i in range(1,len(self.hidden_dims) + 1):
             deep_out = getattr(self, 'linear_' + str(i))(deep_out)
             deep_out = F.relu(getattr(self, 'batchNorm_' + str(i))(deep_out))
-            deep_out = getattr(self, 'dropout_' + str(i))(deep_out)
+            if not self.overfitting:
+                deep_out = getattr(self, 'dropout_' + str(i))(deep_out)
 
         """
             sum
@@ -185,7 +187,7 @@ class DeepFM(nn.Module):
                 reg = self.l1_reg().to(device=self.device, dtype=torch.float32)
                 err = criterion(total, y)
                 fm_dense_reg = torch.abs(3.0 - self.last_reg)
-                loss = err + 1e-8*reg + 1e-3*fm_dense_reg
+                loss = err + 1e-8*reg + fm_dense_reg
                 if not torch.isnan(loss):
                     optimizer.zero_grad()
                     loss.backward()

@@ -10,32 +10,40 @@ import random
 from model.DeepFM import DeepFM
 from data.dataset import CriteoDataset
 
-def split_train_and_valid(train_data):
-    total_set = len(train_data)
-    samples_idx = np.arange(0,total_set)
-    np.random.shuffle(samples_idx)
-    num_train = math.floor(len(samples_idx)*0.8)
-    num_valid = len(samples_idx) - num_train
-    train_idx = samples_idx[:num_train]
-    valid_idx = samples_idx[num_train:]
-    return train_idx, valid_idx
+def split_train_and_valid(train_data, debug=False):
+    if debug:
+        samples_idx = np.arange(0,128)
+        train_idx = samples_idx
+        valid_idx = samples_idx
+        return train_idx, valid_idx
+    else:
+        total_set = len(train_data)
+        samples_idx = np.arange(0,total_set)
+        np.random.shuffle(samples_idx)
+        num_train = math.floor(len(samples_idx)*0.8)
+        num_valid = len(samples_idx) - num_train
+        train_idx = samples_idx[:num_train]
+        valid_idx = samples_idx[num_train:]
+        return train_idx, valid_idx
 
 seed = 20170705
 np.random.seed(seed)
 torch.manual_seed(seed)
 torch.cuda.manual_seed(seed)
-#train_file = "train_large.txt"
-#test_file = "test_large.txt"
-#feature_sizes_file = "feature_sizes_large.txt"
-train_file = "train.txt"
-test_file = "test.txt"
-feature_sizes_file = "feature_sizes.txt"
+train_file = "train_large.txt"
+test_file = "test_large.txt"
+feature_sizes_file = "feature_sizes_large.txt"
+debug = False
+#train_file = "train.txt"
+#test_file = "test.txt"
+#feature_sizes_file = "feature_sizes.txt"
+#debug = True
 
 # load data
 train_data = CriteoDataset('./data', train=True, train_file=train_file)
 
 # split trani and valid set
-train_idx, valid_idx = split_train_and_valid(train_data)
+train_idx, valid_idx = split_train_and_valid(train_data, debug)
 
 # loader
 loader_train = DataLoader(train_data, batch_size=128, sampler=sampler.SubsetRandomSampler(train_idx), num_workers=1)
@@ -45,7 +53,7 @@ feature_sizes = np.loadtxt('./data/{}'.format(feature_sizes_file), delimiter=','
 feature_sizes = [int(x) for x in feature_sizes]
 print(feature_sizes)
 
-model = DeepFM(feature_sizes, use_cuda=True)
+model = DeepFM(feature_sizes, use_cuda=True, overfitting=debug)
 #optimizer = optim.Adam(model.parameters(), lr=1e-4, weight_decay=0.0)
 optimizer = radam.RAdam(model.parameters(), lr=1e-3, weight_decay=0.0)
 model.fit(loader_train, loader_val, optimizer, epochs=1000, verbose=True, print_every=1000)
