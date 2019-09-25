@@ -48,7 +48,7 @@ class DeepFM(nn.Module):
         self.embedding_size = embedding_size
         self.hidden_dims = hidden_dims
         self.dtype = torch.long
-        self.bias = torch.nn.Parameter(torch.zeros(1, dtype=torch.float32))
+        #self.bias = torch.nn.Parameter(torch.zeros(1, dtype=torch.float32))
         """
             check if use cuda
         """
@@ -72,6 +72,7 @@ class DeepFM(nn.Module):
             setattr(self, 'batchNorm_' + str(i), nn.BatchNorm1d(all_dims[i]))
             setattr(self, 'dropout_'+str(i), nn.Dropout(dropout[i-1]))
         self.avg_acc = None
+        self.fm_dense_linear = nn.Linear(3,1)
         self.init_weight()
 
     def init_weight(self):
@@ -79,9 +80,10 @@ class DeepFM(nn.Module):
             if isinstance(m, nn.Linear):
                 nn.init.kaiming_normal_(m.weight, mode='fan_in')
                 nn.init.constant_(m.bias, 0)
-            if isinstance(m, nn.BatchNorm1d):
+            elif isinstance(m, nn.BatchNorm1d):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
+        nn.init.constant_(self.fm_dense_linear.weight, 1.)
 
     def forward(self, Xi, Xv):
         """
@@ -97,7 +99,7 @@ class DeepFM(nn.Module):
 
         # average term
         fm_first_order_emb_arr = [(torch.sum(emb(Xi[:, i, :]), 1).t() * Xv[:, i]).t() for i, emb in enumerate(self.fm_first_order_embeddings)]
-        f1 = torch.cat(fm_first_order_emb_arr, 1)
+        f1 = F.normalize(torch.cat(fm_first_order_emb_arr, 1), dim=1)
 
         # use 2xy = (x+y)^2 - (x^2 + y^2) reduce calculation
         xv = torch.stack([(torch.sum(emb(Xi[:, i, :]), 1).t() * Xv[:, i]).t() for i, emb in enumerate(self.fm_second_order_embeddings)], dim=1)
@@ -125,7 +127,9 @@ class DeepFM(nn.Module):
         self.f1 = f1
         self.f2 = f2
         self.deep_out = deep_out
-        total_sum = torch.sum(f1, 1) + torch.sum(f2, 1) + torch.sum(deep_out, 1) + self.bias
+        #total_sum = torch.sum(f1, 1) + torch.sum(f2, 1) + torch.sum(deep_out, 1) + self.bias
+        self.final_out = torch.stack([torch.sum(f1, 1), torch.sum(f2, 1), torch.sum(deep_out, 1)],dim=1)
+        total_sum = self.fm_dense_linear(self.final_out).squeeze(-1)
         return total_sum
 
 
@@ -133,7 +137,10 @@ class DeepFM(nn.Module):
         reg_loss = torch.zeros(1, dtype=torch.float32, requires_grad=True)
         for varname, param in self.named_parameters():
             if 'bias' not in varname:
-                reg_loss = reg_loss + torch.norm(param)
+                if 'fm_dense_linear' in varname:
+                    reg_loss = reg_loss + 1000.*torch.norm(param)
+                else:
+                    reg_loss = reg_loss + torch.norm(param)
         return reg_loss
 
     def l1_reg(self):
@@ -141,7 +148,9 @@ class DeepFM(nn.Module):
         reg_loss = reg_loss.to(device=self.device, dtype=torch.float32)
         for varname, param in self.named_parameters():
             if 'bias' not in varname:
-                reg_loss = reg_loss + torch.sum(torch.abs(param))
+                if 'fm_dense_linear' not in varname:
+                    reg_loss = reg_loss + torch.sum(torch.abs(param))
+        self.last_reg = torch.sum(self.fm_dense_linear.weight)
         return reg_loss
 
 
@@ -175,14 +184,15 @@ class DeepFM(nn.Module):
                 total = model(xi, xv)
                 reg = self.l1_reg().to(device=self.device, dtype=torch.float32)
                 err = criterion(total, y)
-                loss = err + 1e-8*reg
+                fm_dense_reg = torch.abs(3.0 - self.last_reg)
+                loss = err + 1e-8*reg + 1e-3*fm_dense_reg
                 if not torch.isnan(loss):
                     optimizer.zero_grad()
                     loss.backward()
                     optimizer.step()
 
                 if verbose and t % print_every == 0:
-                    print('Epoch: %d, Iteration %d, loss = %.4f,%.4f,%.4f' % (epoch, t, loss.item(), reg.item(), err.item()))
+                    print('Epoch: %d, Iteration %d, loss = %.4f,%.4f,%.4f, fm_reg=%.4f' % (epoch, t, loss.item(), reg.item(), err.item(), fm_dense_reg.item()))
                     try:
                         self.check_accuracy(self.iter_val, model)
                     except StopIteration:
