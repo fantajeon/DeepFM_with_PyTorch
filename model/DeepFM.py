@@ -73,7 +73,7 @@ class DeepFM(nn.Module):
             setattr(self, 'batchNorm_' + str(i), nn.BatchNorm1d(all_dims[i]))
             setattr(self, 'dropout_'+str(i), nn.Dropout(dropout[i-1]))
         self.avg_acc = None
-        self.fm_dense_linear = nn.Linear(3,1)
+        self.fm_dense_linear = nn.Linear(3,2)
         self.init_weight()
 
     def init_weight(self):
@@ -132,7 +132,7 @@ class DeepFM(nn.Module):
         self.deep_out = deep_out
         #total_sum = torch.sum(f1, 1) + torch.sum(f2, 1) + torch.sum(deep_out, 1) + self.bias
         self.final_out = torch.stack([torch.sum(f1, 1), torch.sum(f2, 1), torch.sum(deep_out, 1)],dim=1)
-        total_sum = self.fm_dense_linear(self.final_out).squeeze(-1)
+        total_sum = self.fm_dense_linear(self.final_out)
         return total_sum
 
 
@@ -156,6 +156,44 @@ class DeepFM(nn.Module):
         self.last_reg = torch.sum(self.fm_dense_linear.weight)
         return reg_loss
 
+    def smooth_one_hot(self, true_labels, smoothing = 0.0):
+        """
+            if smoothing == 0, it's one-hot method
+            if 0 < smoothing < 1, it's smooth method
+        """
+        assert 0 <= smoothing < 1
+        classes = 2
+        confidence = 1.0 - smoothing
+        label_shape = torch.Size((true_labels.size(0), classes))
+        with torch.no_grad():
+            true_dist = torch.empty(size=label_shape, device=true_labels.device)
+            true_dist.fill_(smoothing / (classes - 1))
+            true_dist.scatter_(1, true_labels.data.unsqueeze(1), confidence)
+        return true_dist
+
+    def cross_entropy_with_logit(self, _input, target, size_average=True):
+        """ Cross entropy that accepts soft targets
+        Args:
+             pred: predictions for neural network
+             targets: targets, can be soft
+             size_average: if false, sum is returned instead of mean
+
+        Examples::
+
+            input = torch.FloatTensor([[1.1, 2.8, 1.3], [1.1, 2.1, 4.8]])
+            input = torch.autograd.Variable(out, requires_grad=True)
+
+            target = torch.FloatTensor([[0.05, 0.9, 0.05], [0.05, 0.05, 0.9]])
+            target = torch.autograd.Variable(y1)
+            loss = cross_entropy(input, target)
+            loss.backward()
+        """
+        logsoftmax = nn.LogSoftmax()
+        _input = logsoftmax(_input)
+        if size_average:
+            return torch.mean(torch.sum(-target * _input, dim=1))
+        else:
+            return torch.sum(torch.sum(-target * _input, dim=1))
 
     def fit(self, loader_train, loader_val, optimizer, epochs=1, verbose=False, print_every=100, checkpoint_dir="./chkp"):
         """
@@ -178,6 +216,7 @@ class DeepFM(nn.Module):
             pass
         model = self.train().to(device=self.device)
         criterion = torch.nn.BCEWithLogitsLoss()
+        #criterion = nn.NLLLoss()
         #criterion = nn.MSELoss()
         self.iter_val = iter(loader_val)
         #l2_loss = self.l2_reg()
@@ -191,11 +230,14 @@ class DeepFM(nn.Module):
                 total_loop += 1
                 xi = xi.to(device=self.device, dtype=self.dtype)
                 xv = xv.to(device=self.device, dtype=torch.float32)
-                y = y.to(device=self.device, dtype=torch.float32)
+                y = y.to(device=self.device, dtype=torch.int64)
                 
                 total = model(xi, xv)
                 reg = self.l1_reg().to(device=self.device, dtype=torch.float32)
-                err = criterion(total, y)
+                smooth_label = self.smooth_one_hot(y, 0.0001)
+                total = torch.softmax(total, dim=1)
+                #err = criterion(total, smooth_label) 
+                err = self.cross_entropy_with_logit(total, smooth_label)
                 fm_dense_reg = torch.abs(3.0 - self.last_reg)
                 loss = err + 1e-8*reg + fm_dense_reg
                 if not torch.isnan(loss):
@@ -238,7 +280,7 @@ class DeepFM(nn.Module):
             xv = xv.to(device=self.device, dtype=torch.float32)
             y = y.to(device=self.device, dtype=torch.float32)
             total = model(xi, xv)
-            preds = (torch.sigmoid(total) > 0.5).type(torch.float32)
+            preds = (torch.argmax(torch.softmax(total,dim=1),dim=1)).type(torch.float32)
             num_correct += (preds == y).sum()
             num_samples += preds.size(0)
 
