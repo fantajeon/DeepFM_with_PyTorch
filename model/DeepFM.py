@@ -234,7 +234,7 @@ class DeepFM(nn.Module):
                 total = model(xi, xv)
                 reg = self.l1_reg().to(device=self.device, dtype=torch.float32)
                 smooth_label = self.smooth_one_hot(y, 0.0001)
-                total = torch.softmax(total, dim=1)
+                #total = torch.softmax(total, dim=1)
                 #err = criterion(total, smooth_label) 
                 err = self.cross_entropy(total, smooth_label)
                 fm_dense_reg = torch.abs(3.0 - self.last_reg)
