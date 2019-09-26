@@ -26,7 +26,7 @@ class DeepFM(nn.Module):
     Huifeng Guo, Ruiming Tang, Yunming Yey, Zhenguo Li, Xiuqiang He.
     """
 
-    def __init__(self, feature_sizes, embedding_size=4,
+    def __init__(self, feature_sizes, embedding_size=8,
                  hidden_dims=[200,200,200],
                  dropout=[0.5, 0.5, 0.5], 
                  
@@ -100,7 +100,8 @@ class DeepFM(nn.Module):
 
         # average term
         fm_first_order_emb_arr = [(torch.sum(emb(Xi[:, i, :]), 1).t() * Xv[:, i]).t() for i, emb in enumerate(self.fm_first_order_embeddings)]
-        f1 = F.normalize(torch.cat(fm_first_order_emb_arr, 1), dim=1)
+        #f1 = F.normalize(torch.cat(fm_first_order_emb_arr, 1), dim=1)
+        f1 = torch.cat(fm_first_order_emb_arr, 1)
 
         # use 2xy = (x+y)^2 - (x^2 + y^2) reduce calculation
         xv = torch.stack([(torch.sum(emb(Xi[:, i, :]), 1).t() * Xv[:, i]).t() for i, emb in enumerate(self.fm_second_order_embeddings)], dim=1)
