@@ -3,7 +3,7 @@
 """
 A pytorch implementation of DeepFM for rates prediction problem.
 """
-
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -156,7 +156,7 @@ class DeepFM(nn.Module):
         return reg_loss
 
 
-    def fit(self, loader_train, loader_val, optimizer, epochs=1, verbose=False, print_every=100):
+    def fit(self, loader_train, loader_val, optimizer, epochs=1, verbose=False, print_every=100, checkpoint_dir="./chkp"):
         """
         Training a model and valid accuracy.
 
@@ -171,14 +171,23 @@ class DeepFM(nn.Module):
         """
             load input data
         """
+        try:
+            os.makedirs(checkpoint_dir, exist_ok=True)
+        except FileExistsError:
+            pass
         model = self.train().to(device=self.device)
         criterion = torch.nn.BCEWithLogitsLoss()
         #criterion = nn.MSELoss()
         self.iter_val = iter(loader_val)
         #l2_loss = self.l2_reg()
+        max_avg_acc = 0
+        save_checkpoint = False
+        start_checkpoint = 50000
 
+        total_loop = 0
         for epoch in range(epochs):
             for t, (xi, xv, y) in enumerate(loader_train):
+                total_loop += 1
                 xi = xi.to(device=self.device, dtype=self.dtype)
                 xv = xv.to(device=self.device, dtype=torch.float32)
                 y = y.to(device=self.device, dtype=torch.float32)
@@ -194,13 +203,26 @@ class DeepFM(nn.Module):
                     optimizer.step()
 
                 if verbose and t % print_every == 0:
-                    print('Epoch: %d, Iteration %d, loss = %.4f,%.4f,%.4f, fm_reg=%.4f' % (epoch, t, loss.item(), reg.item(), err.item(), fm_dense_reg.item()))
+                    print('Epoch: %d, Iteration %d, max_avg_acc=%.4f, loss = %.4f,%.4f,%.4f, fm_reg=%.4f' % (epoch, t, max_avg_acc, loss.item(), reg.item(), err.item(), fm_dense_reg.item()))
                     try:
-                        self.check_accuracy(self.iter_val, model)
+                        avg_acc = self.check_accuracy(self.iter_val, model)
+                        if max_avg_acc < avg_acc:
+                            save_checkpoint = True
+                            max_avg_acc = avg_acc
                     except StopIteration:
                         self.iter_val = iter(loader_val)
                     model.train()
-                    print()
+
+                    if total_loop > start_checkpoint and save_checkpoint:
+                        self.save_model(epoch, loss.item(), checkpoint_dir)
+                        save_checkpoint = False
+                    
+    def save_model(self, epoch, loss, checkpoint_dir):
+        checkpoint_file = os.path.join( checkpoint_dir, "model.pth" )
+        torch.save( {'epoch': epoch,
+            'loss': loss,
+            'model_state_dict': self.state_dict()}, checkpoint_file )
+        breakpoint()
     
     def check_accuracy(self, loader, model):
         if loader.dataset.train:
@@ -227,9 +249,10 @@ class DeepFM(nn.Module):
                 else:
                     self.avg_acc = 0.9 * self.avg_acc + 0.1 * acc
                 print('Got %d / %d correct (%.2f%%), avg_acc=%.2f%%' % (num_correct, num_samples, 100 * acc, 100 * self.avg_acc))
+                return self.avg_acc
             except ZeroDivisionError as e:
                 print(e)
-                return
+                return None
 
 
 
