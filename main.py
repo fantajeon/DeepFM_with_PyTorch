@@ -33,9 +33,9 @@ torch.cuda.manual_seed(seed)
 train_file = "train_large.txt"
 feature_sizes_file = "feature_sizes_large.txt"
 debug = False
-#train_file = "train.txt"
-#feature_sizes_file = "feature_sizes.txt"
-#debug = True
+train_file = "train.txt"
+feature_sizes_file = "feature_sizes.txt"
+debug = True
 
 # load data
 train_data = CriteoDataset('./data', train=True, train_file=train_file)
@@ -53,5 +53,5 @@ print(feature_sizes)
 
 model = DeepFM(feature_sizes, use_cuda=True, overfitting=debug)
 #optimizer = optim.Adam(model.parameters(), lr=1e-4, weight_decay=0.0)
-optimizer = radam.RAdam(model.parameters(), lr=1e-3, weight_decay=0.0)
+optimizer = radam.RAdam(model.parameters(), lr=5e-4, weight_decay=0.0)
 model.fit(loader_train, loader_val, optimizer, epochs=1000, verbose=True, print_every=1000, checkpoint_dir="./chkp")

@@ -52,7 +52,7 @@ class MultiHeadAttention(nn.Module):
         
         # concatenate heads and put through final linear layer
         concat = scores.transpose(1,2).contiguous().view(bs, -1, self.d_model)
-        output = self.out(concat)
+        output = self.out(concat).squeeze(dim=1)
         return output
 
 
@@ -115,18 +115,16 @@ class DeepFM(nn.Module):
         all_dims = [self.field_size * self.embedding_size] + self.hidden_dims
         for i in range(1, len(hidden_dims) + 1):
             setattr(self, 'att_'+str(i), MultiHeadAttention(self.field_size, all_dims[0]))
-            setattr(self, 'linear_'+str(i), nn.Linear(all_dims[i-1], all_dims[i]))
-            setattr(self, 'batchNorm_' + str(i), nn.BatchNorm1d(all_dims[i]))
-            if not self.overfitting:
-                setattr(self, 'dropout_'+str(i), nn.Dropout(dropout[i-1]))
         self.avg_acc = None
 
         num_f1 = self.field_size
         num_f2 = self.embedding_size
-        #self.merge_linear = nn.ModuleList( [nn.Linear(num_f1,self.output_dim), nn.Linear(num_f2, self.output_dim), nn.Linear(self.hidden_dims[-1], self.output_dim)] )
         self.merge_linear = nn.ModuleList( [nn.Linear(num_f1,self.output_dim), nn.Linear(num_f2, self.output_dim), nn.Linear(self.field_size*self.embedding_size, self.output_dim)] )
 
-        self.fm_dense_linear = nn.Linear(self.output_dim * 3, 2)
+        num_ffw = self.output_dim * 3
+        self.ffw1 = nn.Linear(num_ffw, num_ffw)
+        self.ffw_dn = nn.Dropout(0.5)
+        self.fm_dense_linear = nn.Linear(num_ffw, 2)
         self.init_weight()
 
     def init_weight(self):
@@ -175,10 +173,6 @@ class DeepFM(nn.Module):
         deep_q = deep_emb
         for i in range(1,len(self.hidden_dims) + 1):
             deep_out = getattr(self, 'att_'+str(i))(deep_k, deep_q, deep_out)
-            #deep_out = getattr(self, 'linear_' + str(i))(deep_out)
-            #deep_out = F.relu(getattr(self, 'batchNorm_' + str(i))(deep_out))
-            #if not self.overfitting:
-            #    deep_out = getattr(self, 'dropout_' + str(i))(deep_out)
         
         """
             sum
@@ -189,8 +183,11 @@ class DeepFM(nn.Module):
         #total_sum = torch.sum(f1, 1) + torch.sum(f2, 1) + torch.sum(deep_out, 1) + self.bias
         #self.final_out = torch.stack([torch.sum(f1, 1), torch.sum(f2, 1), torch.sum(deep_out, 1)],dim=1)
         #self.final_out = torch.stack([self.f1, self.f2, self.deep_out], dim=1)
-        self.final_out = torch.cat([self.f1, self.f2, self.deep_out], dim=1)
-        total_sum = self.fm_dense_linear(self.final_out)
+        self.ffw_in = torch.cat([self.f1, self.f2, self.deep_out], dim=1)
+        self.ffw_out = F.relu(self.ffw1(self.ffw_in))
+        if not self.overfitting:
+            self.ffw_out = self.ffw_dn(self.ffw_out)
+        total_sum = self.fm_dense_linear(self.ffw_out)
         return total_sum
 
 
