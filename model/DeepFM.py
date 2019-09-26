@@ -14,12 +14,13 @@ from time import time
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, heads, d_model, dropout = 0.1):
+    def __init__(self, heads, d_model, dropout = 0.1, overfitting=False):
         super().__init__()
         
         self.d_model = d_model
         self.d_k = d_model // heads
         self.h = heads
+        self.overfitting = overfitting
         
         self.q_linear = nn.Linear(d_model, d_model)
         self.v_linear = nn.Linear(d_model, d_model)
@@ -27,14 +28,15 @@ class MultiHeadAttention(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.out = nn.Linear(d_model, d_model)
 
-    def attention(self, q, k, v, d_k, mask=None, dropout=None):
+    def attention(self, q, k, v, d_k, dropout=None):
         scores = torch.matmul(q, k.transpose(-2, -1)) /  math.sqrt(d_k)
         if dropout is not None:
-            scores = dropout(scores)
+            if not self.overfitting:
+                scores = dropout(scores)
         output = torch.matmul(scores, v)
         return output
 
-    def forward(self, q, k, v, mask=None):
+    def forward(self, q, k, v):
         bs = q.size(0)
         
         # perform linear operation and split into h heads
@@ -48,7 +50,7 @@ class MultiHeadAttention(nn.Module):
         v = v.transpose(1,2)
 
 		# calculate attention using function we will define next
-        scores = self.attention(q, k, v, self.d_k, mask, self.dropout)
+        scores = self.attention(q, k, v, self.d_k, self.dropout)
         
         # concatenate heads and put through final linear layer
         concat = scores.transpose(1,2).contiguous().view(bs, -1, self.d_model)
@@ -114,7 +116,7 @@ class DeepFM(nn.Module):
         """
         all_dims = [self.field_size * self.embedding_size] + self.hidden_dims
         for i in range(1, len(hidden_dims) + 1):
-            setattr(self, 'att_'+str(i), MultiHeadAttention(self.field_size, all_dims[0]))
+            setattr(self, 'att_'+str(i), MultiHeadAttention(self.field_size, all_dims[0], overfitting=self.overfitting))
         self.avg_acc = None
 
         num_f1 = self.field_size
