@@ -192,6 +192,7 @@ class DeepFM(nn.Module):
             norm_x = getattr(self, 'norm_'+str(i))(deep_out)
             deep_out = norm_x + getattr(self, 'att_'+str(i))(norm_x, norm_x, norm_x)
         
+        deep_out = self.norm2(deep_out)
         """
             sum
         """
