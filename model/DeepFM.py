@@ -4,12 +4,56 @@
 A pytorch implementation of DeepFM for rates prediction problem.
 """
 import os
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
 from time import time
+
+
+class MultiHeadAttention(nn.Module):
+    def __init__(self, heads, d_model, dropout = 0.1):
+        super().__init__()
+        
+        self.d_model = d_model
+        self.d_k = d_model // heads
+        self.h = heads
+        
+        self.q_linear = nn.Linear(d_model, d_model)
+        self.v_linear = nn.Linear(d_model, d_model)
+        self.k_linear = nn.Linear(d_model, d_model)
+        self.dropout = nn.Dropout(dropout)
+        self.out = nn.Linear(d_model, d_model)
+
+    def attention(self, q, k, v, d_k, mask=None, dropout=None):
+        scores = torch.matmul(q, k.transpose(-2, -1)) /  math.sqrt(d_k)
+        if dropout is not None:
+            scores = dropout(scores)
+        output = torch.matmul(scores, v)
+        return output
+
+    def forward(self, q, k, v, mask=None):
+        bs = q.size(0)
+        
+        # perform linear operation and split into h heads
+        k = self.k_linear(k).view(bs, -1, self.h, self.d_k)
+        q = self.q_linear(q).view(bs, -1, self.h, self.d_k)
+        v = self.v_linear(v).view(bs, -1, self.h, self.d_k)
+        
+        # transpose to get dimensions bs * h * sl * d_model
+        k = k.transpose(1,2)
+        q = q.transpose(1,2)
+        v = v.transpose(1,2)
+
+		# calculate attention using function we will define next
+        scores = self.attention(q, k, v, self.d_k, mask, self.dropout)
+        
+        # concatenate heads and put through final linear layer
+        concat = scores.transpose(1,2).contiguous().view(bs, -1, self.d_model)
+        output = self.out(concat)
+        return output
 
 
 class DeepFM(nn.Module):
@@ -27,7 +71,7 @@ class DeepFM(nn.Module):
     """
 
     def __init__(self, feature_sizes, embedding_size=8,
-                 hidden_dims=[200,200,200],
+                 hidden_dims=[200,200,200,200,200],
                  dropout=[0.5, 0.5, 0.5], 
                  
                  use_cuda=True, verbose=False, overfitting=False):
@@ -70,14 +114,17 @@ class DeepFM(nn.Module):
         """
         all_dims = [self.field_size * self.embedding_size] + self.hidden_dims
         for i in range(1, len(hidden_dims) + 1):
+            setattr(self, 'att_'+str(i), MultiHeadAttention(self.field_size, all_dims[0]))
             setattr(self, 'linear_'+str(i), nn.Linear(all_dims[i-1], all_dims[i]))
             setattr(self, 'batchNorm_' + str(i), nn.BatchNorm1d(all_dims[i]))
-            setattr(self, 'dropout_'+str(i), nn.Dropout(dropout[i-1]))
+            if not self.overfitting:
+                setattr(self, 'dropout_'+str(i), nn.Dropout(dropout[i-1]))
         self.avg_acc = None
 
-        num_f1 = len(self.feature_sizes)
+        num_f1 = self.field_size
         num_f2 = self.embedding_size
-        self.merge_linear = nn.ModuleList( [nn.Linear(num_f1,self.output_dim), nn.Linear(num_f2, self.output_dim), nn.Linear(self.hidden_dims[-1], self.output_dim)] )
+        #self.merge_linear = nn.ModuleList( [nn.Linear(num_f1,self.output_dim), nn.Linear(num_f2, self.output_dim), nn.Linear(self.hidden_dims[-1], self.output_dim)] )
+        self.merge_linear = nn.ModuleList( [nn.Linear(num_f1,self.output_dim), nn.Linear(num_f2, self.output_dim), nn.Linear(self.field_size*self.embedding_size, self.output_dim)] )
 
         self.fm_dense_linear = nn.Linear(self.output_dim * 3, 2)
         self.init_weight()
@@ -124,18 +171,21 @@ class DeepFM(nn.Module):
         """
         deep_emb = torch.flatten(xv, start_dim=1)
         deep_out = deep_emb
+        deep_k = deep_emb
+        deep_q = deep_emb
         for i in range(1,len(self.hidden_dims) + 1):
-            deep_out = getattr(self, 'linear_' + str(i))(deep_out)
-            deep_out = F.relu(getattr(self, 'batchNorm_' + str(i))(deep_out))
-            if not self.overfitting:
-                deep_out = getattr(self, 'dropout_' + str(i))(deep_out)
-
+            deep_out = getattr(self, 'att_'+str(i))(deep_k, deep_q, deep_out)
+            #deep_out = getattr(self, 'linear_' + str(i))(deep_out)
+            #deep_out = F.relu(getattr(self, 'batchNorm_' + str(i))(deep_out))
+            #if not self.overfitting:
+            #    deep_out = getattr(self, 'dropout_' + str(i))(deep_out)
+        
         """
             sum
         """
         self.f1 = self.merge_linear[0](f1)
         self.f2 = self.merge_linear[1](f2)
-        self.deep_out = self.merge_linear[2](deep_out)
+        self.deep_out = self.merge_linear[2](deep_out.squeeze(1))
         #total_sum = torch.sum(f1, 1) + torch.sum(f2, 1) + torch.sum(deep_out, 1) + self.bias
         #self.final_out = torch.stack([torch.sum(f1, 1), torch.sum(f2, 1), torch.sum(deep_out, 1)],dim=1)
         #self.final_out = torch.stack([self.f1, self.f2, self.deep_out], dim=1)
