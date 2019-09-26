@@ -48,6 +48,7 @@ class DeepFM(nn.Module):
         self.embedding_size = embedding_size
         self.hidden_dims = hidden_dims
         self.dtype = torch.long
+        self.output_dim = 4
         self.overfitting = overfitting
         #self.bias = torch.nn.Parameter(torch.zeros(1, dtype=torch.float32))
         """
@@ -73,7 +74,12 @@ class DeepFM(nn.Module):
             setattr(self, 'batchNorm_' + str(i), nn.BatchNorm1d(all_dims[i]))
             setattr(self, 'dropout_'+str(i), nn.Dropout(dropout[i-1]))
         self.avg_acc = None
-        self.fm_dense_linear = nn.Linear(3,2)
+
+        num_f1 = len(self.feature_sizes)
+        num_f2 = self.embedding_size
+        self.merge_linear = nn.ModuleList( [nn.Linear(num_f1,self.output_dim), nn.Linear(num_f2, self.output_dim), nn.Linear(self.hidden_dims[-1], self.output_dim)] )
+
+        self.fm_dense_linear = nn.Linear(self.output_dim * 3, 2)
         self.init_weight()
 
     def init_weight(self):
@@ -127,11 +133,13 @@ class DeepFM(nn.Module):
         """
             sum
         """
-        self.f1 = f1
-        self.f2 = f2
-        self.deep_out = deep_out
+        self.f1 = self.merge_linear[0](f1)
+        self.f2 = self.merge_linear[1](f2)
+        self.deep_out = self.merge_linear[2](deep_out)
         #total_sum = torch.sum(f1, 1) + torch.sum(f2, 1) + torch.sum(deep_out, 1) + self.bias
-        self.final_out = torch.stack([torch.sum(f1, 1), torch.sum(f2, 1), torch.sum(deep_out, 1)],dim=1)
+        #self.final_out = torch.stack([torch.sum(f1, 1), torch.sum(f2, 1), torch.sum(deep_out, 1)],dim=1)
+        #self.final_out = torch.stack([self.f1, self.f2, self.deep_out], dim=1)
+        self.final_out = torch.cat([self.f1, self.f2, self.deep_out], dim=1)
         total_sum = self.fm_dense_linear(self.final_out)
         return total_sum
 
@@ -151,8 +159,9 @@ class DeepFM(nn.Module):
         reg_loss = reg_loss.to(device=self.device, dtype=torch.float32)
         for varname, param in self.named_parameters():
             if 'bias' not in varname:
-                if 'fm_dense_linear' not in varname:
-                    reg_loss = reg_loss + torch.sum(torch.abs(param))
+                reg_loss = reg_loss + torch.sum(torch.abs(param))
+                #if 'fm_dense_linear' not in varname:
+                #    reg_loss = reg_loss + torch.sum(torch.abs(param))
         self.last_reg = torch.sum(self.fm_dense_linear.weight)
         return reg_loss
 
@@ -214,7 +223,7 @@ class DeepFM(nn.Module):
         except FileExistsError:
             pass
         model = self.train().to(device=self.device)
-        criterion = torch.nn.BCEWithLogitsLoss()
+        #criterion = torch.nn.BCEWithLogitsLoss()
         #criterion = nn.NLLLoss()
         #criterion = nn.MSELoss()
         self.iter_val = iter(loader_val)
@@ -238,7 +247,8 @@ class DeepFM(nn.Module):
                 #err = criterion(total, smooth_label) 
                 err = self.cross_entropy(total, smooth_label)
                 fm_dense_reg = torch.abs(3.0 - self.last_reg)
-                loss = err + 1e-8*reg + fm_dense_reg
+                #loss = err + 1e-8*reg + fm_dense_reg
+                loss = err + 1e-8*reg
                 if not torch.isnan(loss):
                     optimizer.zero_grad()
                     loss.backward()
@@ -256,11 +266,14 @@ class DeepFM(nn.Module):
                     model.train()
 
                     if total_loop > start_checkpoint and save_checkpoint:
-                        self.save_model(epoch, loss.item(), checkpoint_dir)
+                        self.save_model(epoch, loss.item(), checkpoint_dir, "best.pth")
                         save_checkpoint = False
+                if t > start_checkpoint and t%100000 == 0:
+                    self.save_model(epoch, loss.item(), checkpoint_dir, "model.pth")
+
                     
-    def save_model(self, epoch, loss, checkpoint_dir):
-        checkpoint_file = os.path.join( checkpoint_dir, "model.pth" )
+    def save_model(self, epoch, loss, checkpoint_dir, filename):
+        checkpoint_file = os.path.join( checkpoint_dir, filename )
         torch.save( {'epoch': epoch,
             'loss': loss,
             'model_state_dict': self.state_dict()}, checkpoint_file )
