@@ -222,7 +222,6 @@ class DeepFM(nn.Module):
         torch.save( {'epoch': epoch,
             'loss': loss,
             'model_state_dict': self.state_dict()}, checkpoint_file )
-        breakpoint()
     
     def check_accuracy(self, loader, model):
         if loader.dataset.train:
