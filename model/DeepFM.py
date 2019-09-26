@@ -171,7 +171,7 @@ class DeepFM(nn.Module):
             true_dist.scatter_(1, true_labels.data.unsqueeze(1), confidence)
         return true_dist
 
-    def cross_entropy_with_logit(self, _input, target, size_average=True):
+    def cross_entropy(self, _input, target, size_average=True):
         """ Cross entropy that accepts soft targets
         Args:
              pred: predictions for neural network
@@ -188,8 +188,7 @@ class DeepFM(nn.Module):
             loss = cross_entropy(input, target)
             loss.backward()
         """
-        logsoftmax = nn.LogSoftmax()
-        _input = logsoftmax(_input)
+        _input = F.log_softmax(_input,dim=1)
         if size_average:
             return torch.mean(torch.sum(-target * _input, dim=1))
         else:
@@ -237,7 +236,7 @@ class DeepFM(nn.Module):
                 smooth_label = self.smooth_one_hot(y, 0.0001)
                 total = torch.softmax(total, dim=1)
                 #err = criterion(total, smooth_label) 
-                err = self.cross_entropy_with_logit(total, smooth_label)
+                err = self.cross_entropy(total, smooth_label)
                 fm_dense_reg = torch.abs(3.0 - self.last_reg)
                 loss = err + 1e-8*reg + fm_dense_reg
                 if not torch.isnan(loss):
