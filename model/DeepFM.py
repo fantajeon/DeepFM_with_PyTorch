@@ -57,6 +57,19 @@ class MultiHeadAttention(nn.Module):
         output = self.out(concat).squeeze(dim=1)
         return output
 
+class Norm(nn.Module):
+    def __init__(self, d_model, eps = 1e-6):
+        super().__init__()
+    
+        self.size = d_model
+        # create two learnable parameters to calibrate normalisation
+        self.alpha = nn.Parameter(torch.ones(self.size))
+        self.bias = nn.Parameter(torch.zeros(self.size))
+        self.eps = eps
+    def forward(self, x):
+        norm = self.alpha * (x - x.mean(dim=-1, keepdim=True)) \
+        / (x.std(dim=-1, keepdim=True) + self.eps) + self.bias
+        return norm
 
 class DeepFM(nn.Module):
     """
@@ -116,7 +129,9 @@ class DeepFM(nn.Module):
         """
         all_dims = [self.field_size * self.embedding_size] + self.hidden_dims
         for i in range(1, len(hidden_dims) + 1):
+            setattr(self, 'norm_'+str(i), Norm(all_dims[0]))
             setattr(self, 'att_'+str(i), MultiHeadAttention(self.field_size, all_dims[0], overfitting=self.overfitting))
+        self.norm2 = Norm(all_dims[0])
         self.avg_acc = None
 
         num_f1 = self.field_size
@@ -174,7 +189,8 @@ class DeepFM(nn.Module):
         deep_k = deep_emb
         deep_q = deep_emb
         for i in range(1,len(self.hidden_dims) + 1):
-            deep_out = getattr(self, 'att_'+str(i))(deep_k, deep_q, deep_out)
+            norm_x = getattr(self, 'norm_'+str(i))(deep_out)
+            deep_out = norm_x + getattr(self, 'att_'+str(i))(norm_x, norm_x, norm_x)
         
         """
             sum
