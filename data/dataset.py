@@ -26,12 +26,12 @@ class CriteoDataset(Dataset):
             raise RuntimeError('Dataset not found.')
 
         if self.train:
-            data = pd.read_csv(os.path.join(root, train_file))
+            data = pd.read_csv(os.path.join(root, train_file), header=None)
             self.train_data = data.iloc[:, :-1].values
             self.target = data.iloc[:, -1].values
         else:
-            data = pd.read_csv(os.path.join(root, test_file))
-            self.test_data = data.iloc[:, :-1].values
+            data = pd.read_csv(os.path.join(root, test_file), header=None)
+            self.test_data = data.iloc[:, :].values
     
     def __getitem__(self, idx):
         if self.train:
@@ -43,11 +43,8 @@ class CriteoDataset(Dataset):
             return Xi, Xv, targetI
         else:
             dataI = self.test_data[idx, :]
-            breakpoint()
-            #Xi = torch.from_numpy(dataI.astype(np.int32)).unsqueeze(-1)
-            #Xv = torch.from_numpy(np.ones_like(dataI))
             Xi = torch.cat([torch.zeros(len(self.continous_features),dtype=torch.int64), torch.tensor(dataI[self.categorial_features], dtype=torch.int64)], dim=0).unsqueeze(-1)
-            Xv = torch.cat([torch.tensor(dataI[self.continous_features],dtype=torch.float32), torch.ones(len(self.categorial_features),dtype=torch.float32)], dim=0)
+            Xv = torch.cat([torch.tensor(dataI[self.continous_features],dtype=torch.float32), torch.ones(len(self.categorial_features),dtype=torch.float32)], dim=0).type(torch.float32)
             return Xi, Xv
 
     def __len__(self):

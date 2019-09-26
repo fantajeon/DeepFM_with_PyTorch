@@ -81,11 +81,11 @@ class ContinuousFeatureGenerator:
                             self.max_val[i] = val
 
     def gen(self, idx, val):
-        if val == '':
-            return 0.0
-        eps = 1e-6
         min_v = self.min_val[idx]
         max_v = self.max_val[idx]
+        if val == '':
+            return 0.5*(max_v + min_v)
+        eps = 1e-6
         val = (float(val) - min_v) / (max_v - min_v + eps)
         return val
 
@@ -160,5 +160,5 @@ def preprocess(datadir, outdir, train_file='train.txt', test_file='test_file', f
                 out.write(','.join([continous_vals, categorial_vals]) + '\n')
 
 if __name__ == "__main__":
-    #preprocess('./data/raw', './data', train_file='train_large.txt', test_file='test_large.txt', feature_sizes_file="feature_sizes_large.txt")
-    preprocess('./data/raw', './data', train_file='train.txt', test_file='test.txt', feature_sizes_file = 'feature_sizes.txt',  cutoff=0)
+    preprocess('./data/raw', './data', train_file='train_large.txt', test_file='test_large.txt', feature_sizes_file="feature_sizes_large.txt")
+    #preprocess('./data/raw', './data', train_file='train.txt', test_file='test.txt', feature_sizes_file = 'feature_sizes.txt',  cutoff=0)
