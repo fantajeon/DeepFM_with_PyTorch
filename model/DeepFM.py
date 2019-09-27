@@ -334,7 +334,7 @@ class DeepFM(nn.Module):
                     if total_loop > start_checkpoint and save_checkpoint:
                         self.save_model(epoch, loss.item(), checkpoint_dir, "best.pth")
                         save_checkpoint = False
-                if t > start_checkpoint and t%100000 == 0:
+                if total_loop > start_checkpoint and t%100000 == 0:
                     self.save_model(epoch, loss.item(), checkpoint_dir, "model.pth")
 
                     

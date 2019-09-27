@@ -32,6 +32,7 @@ torch.manual_seed(seed)
 torch.cuda.manual_seed(seed)
 train_file = "train_large.txt"
 feature_sizes_file = "feature_sizes_large.txt"
+load_model = "./chkp.20190919/model.pth"
 debug = False
 #train_file = "train.txt"
 #feature_sizes_file = "feature_sizes.txt"
@@ -52,6 +53,10 @@ feature_sizes = [int(x) for x in feature_sizes]
 print(feature_sizes)
 
 model = DeepFM(feature_sizes, use_cuda=True, overfitting=debug)
+if not load_model is None:
+    model_state = torch.load( load_model )
+    model.load_state_dict( model_state['model_state_dict'] )
+    del model_state
 #optimizer = optim.Adam(model.parameters(), lr=1e-4, weight_decay=0.0)
 optimizer = radam.RAdam(model.parameters(), lr=5e-4, weight_decay=0.0)
 model.fit(loader_train, loader_val, optimizer, epochs=1000, verbose=True, print_every=1000, checkpoint_dir="./chkp")

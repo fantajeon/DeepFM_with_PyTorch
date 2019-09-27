@@ -17,6 +17,7 @@ class CriteoDataset(Dataset):
         - root: Path where the processed data file stored.
         - train: Train or test. Required.
         """
+        super(CriteoDataset, self).__init__()
         self.continous_features = range(0, 13)
         self.categorial_features = range(13, 39)
         self.root = root
@@ -32,14 +33,13 @@ class CriteoDataset(Dataset):
         else:
             data = pd.read_csv(os.path.join(root, test_file), header=None)
             self.test_data = data.iloc[:, :].values
+        del data
     
     def __getitem__(self, idx):
         if self.train:
             dataI, targetI = self.train_data[idx, :], self.target[idx]
             Xi = torch.cat([torch.zeros(len(self.continous_features),dtype=torch.int64), torch.tensor(dataI[self.categorial_features], dtype=torch.int64)], dim=0).unsqueeze(-1)
             Xv = torch.cat([torch.tensor(dataI[self.continous_features],dtype=torch.float32), torch.ones(len(self.categorial_features),dtype=torch.float32)], dim=0).type(torch.float32)
-            #Xi = torch.from_numpy(dataI.astype(np.int32)).unsqueeze(-1)
-            #Xv = torch.from_numpy(np.ones_like(dataI))
             return Xi, Xv, targetI
         else:
             dataI = self.test_data[idx, :]
