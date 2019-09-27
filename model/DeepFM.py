@@ -66,9 +66,9 @@ class Norm(nn.Module):
         self.bias = nn.Parameter(torch.zeros(self.size))
         self.eps = eps
     def forward(self, x):
-        #norm = self.alpha * (x - x.mean(dim=-1, keepdim=True)) \
-        #/ (x.std(dim=-1, keepdim=True) + self.eps) + self.bias
-        norm = self.alpha * F.normalize(x,dim=-1) + self.bias
+        norm = self.alpha * (x - x.mean(dim=-1, keepdim=True)) \
+                / (x.std(dim=-1, keepdim=True) + self.eps) + self.bias
+        #norm = self.alpha * F.normalize(x,dim=-1) + self.bias
         return norm
 
 class FeedForward(nn.Module):
