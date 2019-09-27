@@ -393,9 +393,10 @@ class DeepFM(nn.Module):
                 if verbose and t % print_every == 0:
                     try:
                         avg_acc, avg_loss = self.check_accuracy(self.iter_val, model)
-                        if max_avg_score < avg_acc:
+                        #if max_avg_score < avg_loss:
+                        if max_avg_score > avg_loss:
                             save_checkpoint = True
-                            max_avg_score = avg_acc
+                            max_avg_score = avg_loss
                         print('Epoch: %d, Iteration %d, max_avg_score=%.4f, avg(%.4f,%.4f), loss = %.4f,%.4f,%.4f, fm_reg=%.4f' % (epoch, t, max_avg_score, avg_acc, avg_loss, loss.item(), reg.item(), err.item(), fm_dense_reg.item()))
                     except StopIteration:
                         self.iter_val = iter(loader_val)
@@ -447,7 +448,7 @@ class DeepFM(nn.Module):
                 else:
                     self.avg_acc = 0.9 * self.avg_acc + 0.1 * acc
                     self.avg_loss = 0.9 * self.avg_loss + 0.1 * loss
-                print('Got %d / %d correct (%.2f%%), avg_acc=%.2f%%' % (num_correct, num_samples, 100 * acc, 100 * self.avg_acc))
+                print("Got %d / %d correct (%.2f%%), avg_acc=%.2f%%, avg_loss=%.2f%%" % (num_correct, num_samples, 100 * acc, 100 * self.avg_acc, self.avg_loss))
                 return self.avg_acc, self.avg_loss
             except ZeroDivisionError as e:
                 print(e)
