@@ -53,7 +53,7 @@ feature_sizes = [int(x) for x in feature_sizes]
 print(feature_sizes)
 
 model = DeepFM(feature_sizes, use_cuda=True, overfitting=debug)
-if not load_model is None:
+if not load_model is None and os.path.exists(load_model):
     model_state = torch.load( load_model )
     model.load_state_dict( model_state['model_state_dict'] )
     del model_state
