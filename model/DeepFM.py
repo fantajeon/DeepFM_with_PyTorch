@@ -71,6 +71,26 @@ class Norm(nn.Module):
         / (x.std(dim=-1, keepdim=True) + self.eps) + self.bias
         return norm
 
+class EncoderLayer(nn.Module):
+    def __init__(self, heads, d_model, dropout=0.1, overfitting=False):
+        super().__init__()
+        self.overfitting = overfitting
+        self.heads = heads
+        self.d_model = d_model
+        self.norm = Norm(self.d_model)
+        self.att = MultiHeadAttention(self.heads, self.d_model, dropout=dropout, overfitting=self.overfitting)
+        self.dn = nn.Dropout(dropout)
+
+    def forward(self, x):
+        norm_x = self.norm(x)
+        att = self.att(norm_x, norm_x, norm_x)
+        if not self.overfitting:
+            att = self.dn(att)
+        deep_out = norm_x + att
+        
+        return deep_out
+
+
 class DeepFM(nn.Module):
     """
     A DeepFM network with RMSE loss for rates prediction problem.
@@ -129,10 +149,10 @@ class DeepFM(nn.Module):
         """
         all_dims = [self.field_size * self.embedding_size] + self.hidden_dims
         for i in range(1, len(hidden_dims) + 1):
-            setattr(self, 'norm_'+str(i), Norm(all_dims[0]))
-            setattr(self, 'att_'+str(i), MultiHeadAttention(self.field_size, all_dims[0], overfitting=self.overfitting))
+            setattr(self, "encoder_"+str(i), EncoderLayer(self.field_size, all_dims[0], overfitting=self.overfitting))
         self.norm2 = Norm(all_dims[0])
         self.avg_acc = None
+        self.avg_loss = None
 
         num_f1 = self.field_size
         num_f2 = self.embedding_size
@@ -189,8 +209,9 @@ class DeepFM(nn.Module):
         deep_k = deep_emb
         deep_q = deep_emb
         for i in range(1,len(self.hidden_dims) + 1):
-            norm_x = getattr(self, 'norm_'+str(i))(deep_out)
-            deep_out = norm_x + getattr(self, 'att_'+str(i))(norm_x, norm_x, norm_x)
+            deep_out = getattr(self, "encoder_" + str(i))(deep_out)
+            #norm_x = getattr(self, 'norm_'+str(i))(deep_out)
+            #deep_out = norm_x + getattr(self, 'att_'+str(i))(norm_x, norm_x, norm_x)
         
         deep_out = self.norm2(deep_out)
         """
@@ -294,7 +315,7 @@ class DeepFM(nn.Module):
         #criterion = nn.MSELoss()
         self.iter_val = iter(loader_val)
         #l2_loss = self.l2_reg()
-        max_avg_acc = 0
+        max_avg_score = 0
         save_checkpoint = False
         start_checkpoint = 50000
 
@@ -321,12 +342,12 @@ class DeepFM(nn.Module):
                     optimizer.step()
 
                 if verbose and t % print_every == 0:
-                    print('Epoch: %d, Iteration %d, max_avg_acc=%.4f, loss = %.4f,%.4f,%.4f, fm_reg=%.4f' % (epoch, t, max_avg_acc, loss.item(), reg.item(), err.item(), fm_dense_reg.item()))
                     try:
-                        avg_acc = self.check_accuracy(self.iter_val, model)
-                        if max_avg_acc < avg_acc:
+                        avg_acc, avg_loss = self.check_accuracy(self.iter_val, model)
+                        if max_avg_score < avg_acc:
                             save_checkpoint = True
-                            max_avg_acc = avg_acc
+                            max_avg_score = avg_acc
+                        print('Epoch: %d, Iteration %d, max_avg_score=%.4f, avg(%.4f,%.4f), loss = %.4f,%.4f,%.4f, fm_reg=%.4f' % (epoch, t, max_avg_score, avg_acc, avg_loss, loss.item(), reg.item(), err.item(), fm_dense_reg.item()))
                     except StopIteration:
                         self.iter_val = iter(loader_val)
                     model.train()
@@ -343,7 +364,11 @@ class DeepFM(nn.Module):
         torch.save( {'epoch': epoch,
             'loss': loss,
             'model_state_dict': self.state_dict()}, checkpoint_file )
-    
+   
+    def logloss(self, y, prob):
+        logloss = -(y * torch.log(prob) + (1.0 - y) * torch.log(1.0 - prob)).mean()
+        return logloss
+
     def check_accuracy(self, loader, model):
         if loader.dataset.train:
             print('Checking accuracy on validation set')
@@ -358,7 +383,10 @@ class DeepFM(nn.Module):
             xv = xv.to(device=self.device, dtype=torch.float32)
             y = y.to(device=self.device, dtype=torch.float32)
             total = model(xi, xv)
-            preds = (torch.argmax(torch.softmax(total,dim=1),dim=1)).type(torch.float32)
+            cvr = torch.softmax(total,dim=1)
+            prob = cvr[:,1]
+            loss = self.logloss(y, prob).item()
+            preds = (torch.argmax(cvr,dim=1)).type(torch.float32)
             num_correct += (preds == y).sum()
             num_samples += preds.size(0)
 
@@ -366,13 +394,15 @@ class DeepFM(nn.Module):
                 acc = float(num_correct) / num_samples
                 if self.avg_acc is None:
                     self.avg_acc = acc
+                    self.avg_loss = loss
                 else:
                     self.avg_acc = 0.9 * self.avg_acc + 0.1 * acc
+                    self.avg_loss = 0.9 * self.avg_loss + 0.1 * loss
                 print('Got %d / %d correct (%.2f%%), avg_acc=%.2f%%' % (num_correct, num_samples, 100 * acc, 100 * self.avg_acc))
-                return self.avg_acc
+                return self.avg_acc, self.avg_loss
             except ZeroDivisionError as e:
                 print(e)
-                return None
+                return None, None
 
 
 

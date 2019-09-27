@@ -6,6 +6,7 @@ import radam
 from torch.utils.data import DataLoader
 from torch.utils.data import sampler
 import random
+import os
 
 from model.DeepFM import DeepFM
 from data.dataset import CriteoDataset
@@ -30,9 +31,10 @@ seed = 20170705
 np.random.seed(seed)
 torch.manual_seed(seed)
 torch.cuda.manual_seed(seed)
+#load_model = "./chkp.20190919/model.pth"
+load_model = None
 train_file = "train_large.txt"
 feature_sizes_file = "feature_sizes_large.txt"
-load_model = "./chkp.20190919/model.pth"
 debug = False
 #train_file = "train.txt"
 #feature_sizes_file = "feature_sizes.txt"
