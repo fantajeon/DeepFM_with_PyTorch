@@ -359,7 +359,8 @@ class DeepFM(nn.Module):
         #criterion = nn.MSELoss()
         self.iter_val = iter(loader_val)
         #l2_loss = self.l2_reg()
-        max_avg_score = 0
+        #max_avg_score = 0
+        max_avg_score = 99999999
         save_checkpoint = False
         start_checkpoint = 50000
 
@@ -448,7 +449,7 @@ class DeepFM(nn.Module):
                 else:
                     self.avg_acc = 0.9 * self.avg_acc + 0.1 * acc
                     self.avg_loss = 0.9 * self.avg_loss + 0.1 * loss
-                print("Got %d / %d correct (%.2f%%), avg_acc=%.2f%%, avg_loss=%.2f%%" % (num_correct, num_samples, 100 * acc, 100 * self.avg_acc, self.avg_loss))
+                print("Got %d / %d correct (%.2f%%), avg_acc=%.2f%%, avg_loss=%.2f, loss=%.2f" % (num_correct, num_samples, 100 * acc, 100 * self.avg_acc, self.avg_loss, loss))
                 return self.avg_acc, self.avg_loss
             except ZeroDivisionError as e:
                 print(e)
