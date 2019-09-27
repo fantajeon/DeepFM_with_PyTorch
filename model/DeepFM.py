@@ -28,11 +28,10 @@ class MultiHeadAttention(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.out = nn.Linear(d_model, d_model)
 
-    def attention(self, q, k, v, d_k, dropout=None):
+    def attention(self, q, k, v, d_k):
         scores = torch.matmul(q, k.transpose(-2, -1)) /  math.sqrt(d_k)
-        if dropout is not None:
-            if not self.overfitting:
-                scores = dropout(scores)
+        if not self.overfitting:
+            scores = self.dropout(scores)
         output = torch.matmul(scores, v)
         return output
 
@@ -50,11 +49,11 @@ class MultiHeadAttention(nn.Module):
         v = v.transpose(1,2)
 
 		# calculate attention using function we will define next
-        scores = self.attention(q, k, v, self.d_k, self.dropout)
+        scores = self.attention(q, k, v, self.d_k)
         
         # concatenate heads and put through final linear layer
         concat = scores.transpose(1,2).contiguous().view(bs, -1, self.d_model)
-        output = self.out(concat).squeeze(dim=1)
+        output = self.out(concat)
         return output
 
 class Norm(nn.Module):
@@ -67,8 +66,9 @@ class Norm(nn.Module):
         self.bias = nn.Parameter(torch.zeros(self.size))
         self.eps = eps
     def forward(self, x):
-        norm = self.alpha * (x - x.mean(dim=-1, keepdim=True)) \
-        / (x.std(dim=-1, keepdim=True) + self.eps) + self.bias
+        #norm = self.alpha * (x - x.mean(dim=-1, keepdim=True)) \
+        #/ (x.std(dim=-1, keepdim=True) + self.eps) + self.bias
+        norm = F.normalize(x,dim=-1)
         return norm
 
 class EncoderLayer(nn.Module):
@@ -149,8 +149,8 @@ class DeepFM(nn.Module):
         """
         all_dims = [self.field_size * self.embedding_size] + self.hidden_dims
         for i in range(1, len(hidden_dims) + 1):
-            setattr(self, "encoder_"+str(i), EncoderLayer(self.field_size, all_dims[0], overfitting=self.overfitting))
-        self.norm2 = Norm(all_dims[0])
+            setattr(self, "encoder_"+str(i), EncoderLayer(1, self.embedding_size, overfitting=self.overfitting))
+        self.norm2 = Norm(self.embedding_size)
         self.avg_acc = None
         self.avg_loss = None
 
@@ -164,6 +164,11 @@ class DeepFM(nn.Module):
         self.fm_dense_linear = nn.Linear(num_ffw, 2)
         self.init_weight()
 
+    def check_num(self, data):
+        #if torch.sum( torch.isinf(data)).item() > 0 or torch.sum(torch.isnan(data)) > 0:
+        if torch.sum( data > 1000.0).item() > 0 or torch.sum( data < -1000.0 ) > 0:
+            breakpoint()
+
     def init_weight(self):
         for m in self.modules():
             if isinstance(m, nn.Linear):
@@ -172,6 +177,8 @@ class DeepFM(nn.Module):
             elif isinstance(m, nn.BatchNorm1d):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
+            if isinstance(m, nn.Embedding):
+                nn.init.sparse_(m.weight, 0.01)
         nn.init.constant_(self.fm_dense_linear.weight, 1.)
 
     def forward(self, Xi, Xv):
@@ -188,32 +195,35 @@ class DeepFM(nn.Module):
 
         # average term
         fm_first_order_emb_arr = [(torch.sum(emb(Xi[:, i, :]), 1).t() * Xv[:, i]).t() for i, emb in enumerate(self.fm_first_order_embeddings)]
-        #f1 = F.normalize(torch.cat(fm_first_order_emb_arr, 1), dim=1)
         f1 = torch.cat(fm_first_order_emb_arr, 1)
 
         # use 2xy = (x+y)^2 - (x^2 + y^2) reduce calculation
-        xv = torch.stack([(torch.sum(emb(Xi[:, i, :]), 1).t() * Xv[:, i]).t() for i, emb in enumerate(self.fm_second_order_embeddings)], dim=1)
+        xv = torch.stack([(torch.mean(emb(Xi[:, i, :]), 1).t() * Xv[:, i]).t() for i, emb in enumerate(self.fm_second_order_embeddings)], dim=1)
+
+        self.check_num(xv)
         xv = F.normalize(xv,dim=1)
-        s1 = torch.sum(xv,dim=1).pow(2.0)
-        s2 = torch.sum(xv.pow(2.0), dim=1)
+        self.check_num(xv)
+        s1 = torch.mean(xv,dim=1).pow(2.0)
+        s2 = torch.mean(xv.pow(2.0), dim=1)
         f2 = 0.5 * (s1 - s2)
         self.xv = xv
         self.s1 = s1
         self.s2 = s2
 
+        self.check_num(xv)
+        self.check_num(s1)
+        self.check_num(s2)
+
         """
             deep part
         """
-        deep_emb = torch.flatten(xv, start_dim=1)
-        deep_out = deep_emb
-        deep_k = deep_emb
-        deep_q = deep_emb
+        deep_out = xv 
         for i in range(1,len(self.hidden_dims) + 1):
             deep_out = getattr(self, "encoder_" + str(i))(deep_out)
-            #norm_x = getattr(self, 'norm_'+str(i))(deep_out)
-            #deep_out = norm_x + getattr(self, 'att_'+str(i))(norm_x, norm_x, norm_x)
-        
+            self.check_num(deep_out)
         deep_out = self.norm2(deep_out)
+        self.check_num(deep_out)
+        deep_out = torch.flatten(deep_out, start_dim=1)
         """
             sum
         """
@@ -227,19 +237,9 @@ class DeepFM(nn.Module):
         self.ffw_out = F.relu(self.ffw1(self.ffw_in))
         if not self.overfitting:
             self.ffw_out = self.ffw_dn(self.ffw_out)
+        self.check_num(self.ffw_out)
         total_sum = self.fm_dense_linear(self.ffw_out)
         return total_sum
-
-
-    def l2_reg(self):
-        reg_loss = torch.zeros(1, dtype=torch.float32, requires_grad=True)
-        for varname, param in self.named_parameters():
-            if 'bias' not in varname:
-                if 'fm_dense_linear' in varname:
-                    reg_loss = reg_loss + 1000.*torch.norm(param)
-                else:
-                    reg_loss = reg_loss + torch.norm(param)
-        return reg_loss
 
     def l1_reg(self):
         reg_loss = torch.zeros(1, dtype=torch.float32, requires_grad=True)
@@ -247,8 +247,8 @@ class DeepFM(nn.Module):
         for varname, param in self.named_parameters():
             if 'bias' not in varname:
                 reg_loss = reg_loss + torch.sum(torch.abs(param))
-                #if 'fm_dense_linear' not in varname:
-                #    reg_loss = reg_loss + torch.sum(torch.abs(param))
+            #if 'fm_second_order_embeddings' in varname:
+            #    reg_loss = reg_loss + 100000000.0*torch.sum(torch.abs(param))
         self.last_reg = torch.sum(self.fm_dense_linear.weight)
         return reg_loss
 
@@ -339,7 +339,12 @@ class DeepFM(nn.Module):
                 if not torch.isnan(loss):
                     optimizer.zero_grad()
                     loss.backward()
+                    torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=0.000001)
                     optimizer.step()
+                else:
+                    print("BUG!!")
+                    print('Epoch: %d, Iteration %d, max_avg_score=%.4f, avg(%.4f,%.4f), loss = %.4f,%.4f,%.4f, fm_reg=%.4f' % (epoch, t, max_avg_score, avg_acc, avg_loss, loss.item(), reg.item(), err.item(), fm_dense_reg.item()))
+                    breakpoint()
 
                 if verbose and t % print_every == 0:
                     try:

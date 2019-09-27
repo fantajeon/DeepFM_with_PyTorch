@@ -36,9 +36,9 @@ load_model = None
 train_file = "train_large.txt"
 feature_sizes_file = "feature_sizes_large.txt"
 debug = False
-#train_file = "train.txt"
-#feature_sizes_file = "feature_sizes.txt"
-#debug = True
+train_file = "train.txt"
+feature_sizes_file = "feature_sizes.txt"
+debug = True
 
 # load data
 train_data = CriteoDataset('./data', train=True, train_file=train_file)
