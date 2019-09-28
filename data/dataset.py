@@ -60,20 +60,15 @@ class CriteoDataset(Dataset):
         return os.path.exists(self.root)
 
 class OneLabelDataset(Dataset):
-    def __init__(self, root, target_label, train_file="train.txt"):
+    def __init__(self, data, target_label):
         super(OneLabelDataset, self).__init__()
+        self.target_label = target_label
         self.continous_features = continous_features
         self.categorical_features = categorical_features
-        self.root = root
 
-        if not self._check_exists():
-            raise RuntimeError('Dataset not found.')
-
-        data = pd.read_csv(os.path.join(root, train_file), header=None)
         data = data[data.iloc[:,-1] == target_label]
         self.train_data = data.iloc[:, :-1].values
         self.target = data.iloc[:, -1].values
-        del data
     
     def __getitem__(self, idx):
         dataI, targetI = self.train_data[idx, :], self.target[idx]
@@ -84,12 +79,10 @@ class OneLabelDataset(Dataset):
     def __len__(self):
         return len(self.train_data)
 
-    def _check_exists(self):
-        return os.path.exists(self.root)
-
 def get_split_dataset(root, train_file):
-    pos_dataset = OneLabelDataset(root, 1, train_file)
-    neg_dataset = OneLabelDataset(root, 0, train_file)
+    data = pd.read_csv(os.path.join(root, train_file), header=None)
+    pos_dataset = OneLabelDataset(data, 1)
+    neg_dataset = OneLabelDataset(data, 0)
     return pos_dataset, neg_dataset
 
 class MultipleIter(object):

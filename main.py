@@ -33,7 +33,7 @@ def split_train_and_valid(pos_dataset, neg_dataset, debug=False):
         return [pos_train_idx, neg_train_idx], [pos_valid_idx, neg_valid_idx]
 
 seed = 20170705
-batch_size = 256 // 2
+batch_size = 256
 np.random.seed(seed)
 torch.manual_seed(seed)
 torch.cuda.manual_seed(seed)
