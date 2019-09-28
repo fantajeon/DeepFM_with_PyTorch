@@ -30,7 +30,7 @@ def split_train_and_valid(pos_dataset, neg_dataset, debug=False):
     else:
         pos_train_idx, pos_valid_idx = generate_sample_idx(pos_dataset)
         neg_train_idx, neg_valid_idx = generate_sample_idx(neg_dataset)
-        return [pos_train_idx, neg_train_idx], [pos_valid_idx, neg_vallid_idx]
+        return [pos_train_idx, neg_train_idx], [pos_valid_idx, neg_valid_idx]
 
 seed = 20170705
 batch_size = 256 // 2
