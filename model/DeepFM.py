@@ -444,12 +444,12 @@ class DeepFM(nn.Module):
             'model_state_dict': self.state_dict()}, checkpoint_file )
    
     def logloss(self, y, p):
-        #prob = torch.clamp(prob,min=1e-16)
-        #p1 = torch.log(prob)
-        #p2 = torch.log(1.0 - prob)
-        #logloss = -(y *p1  + (1.0 - y) *p2).mean()
-        s = (1. + torch.exp(p))
-        L = -(y*torch.log( torch.exp(p) /s ) + (1.-y) *torch.log(1./s)).mean()
+        p = torch.clamp(p,min=1e-30)
+        p1 = torch.log(p)
+        p2 = torch.log(1.0 - p)
+        L = -(y *p1  + (1.0 - y) *p2).mean()
+        #s = (1. + torch.exp(p))
+        #L = -(y*torch.log( torch.exp(p) /s ) + (1.-y) *torch.log(1./s)).mean()
         return L
 
     def check_accuracy(self, loader, model):
