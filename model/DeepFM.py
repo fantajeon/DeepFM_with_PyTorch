@@ -72,15 +72,46 @@ class Norm(nn.Module):
         return norm
 
 class FeedForward(nn.Module):
-    def __init__(self, d_model, d_ff=2048, dropout = 0.1):
+    def __init__(self, d_model, d_ff=128, dropout = 0.1, overfitting=False):
         super().__init__() 
         # We set d_ff as a default to 2048
+        self.d_model = d_model
+        self.overfitting = overfitting
+        self.d_ff = d_ff
         self.linear_1 = nn.Linear(d_model, d_ff)
         self.dropout = nn.Dropout(dropout)
+        self.bn = nn.BatchNorm1d(d_ff)
         self.linear_2 = nn.Linear(d_ff, d_model)
+
     def forward(self, x):
-        x = self.dropout(F.relu(self.linear_1(x)))
-        x = self.linear_2(x)
+        x1 = self.linear_1(x)
+        if x1.dim() == 3:
+            x1 = F.relu(self.bn( x1.transpose(1,2) ).transpose(1,2))
+        else:
+            x1 = F.relu(self.bn( x1 ))
+        if not self.overfitting:
+            x1 = self.dropout(x1)
+        x = self.linear_2(x1)
+        return x
+
+class ClassificationLayer(nn.Module):
+    def __init__(self, d_model, output, d_ff=128, dropout = 0.1, overfitting=False):
+        super().__init__() 
+        # We set d_ff as a default to 2048
+        self.overfitting = overfitting
+        self.d_model = d_model
+        self.d_ff = d_ff
+        self.linear_1 = nn.Linear(d_model, d_ff)
+        self.dropout = nn.Dropout(dropout)
+        self.bn = nn.BatchNorm1d(d_ff)
+        self.linear_2 = nn.Linear(d_ff, output)
+
+    def forward(self, x):
+        x1 = self.linear_1(x)
+        x1 = F.relu(self.bn( x1 ))
+        if not self.overfitting:
+            x1 = self.dropout( x1 )
+        x = self.linear_2(x1)
         return x
 
 class EncoderLayer(nn.Module):
@@ -91,7 +122,7 @@ class EncoderLayer(nn.Module):
         self.d_model = d_model
         self.norm1 = Norm(self.d_model)
         self.norm2 = Norm(self.d_model)
-        self.ff = FeedForward(d_model)
+        self.ff = FeedForward(d_model, overfitting = overfitting)
         self.att = MultiHeadAttention(self.heads, self.d_model, dropout=dropout, overfitting=self.overfitting)
         self.dn1 = nn.Dropout(dropout)
         self.dn2 = nn.Dropout(dropout)
@@ -204,10 +235,8 @@ class DeepFM(nn.Module):
         self.merge_linear = nn.ModuleList( [nn.Linear(num_f1,self.output_dim), nn.Linear(num_f2, self.output_dim), nn.Linear(self.field_size*self.embedding_size, self.output_dim)] )
 
         num_ffw = self.output_dim * 3
-        self.ffw1 = nn.Linear(num_ffw, num_ffw)
-        self.ffw_dn = nn.Dropout(0.5)
-        self.fm_dense_linear = nn.Linear(num_ffw, 2)
-        self.pe = PositionalEncoder(self.embedding_size)
+        self.fm_dense_linear = ClassificationLayer(num_ffw, 2, dropout=0.1, overfitting=self.overfitting)
+        self.pe = PositionalEncoder(self.embedding_size, max_seq_len=self.field_size)
         self.init_weight()
 
     def check_num(self, data):
@@ -225,7 +254,7 @@ class DeepFM(nn.Module):
                 nn.init.constant_(m.bias, 0)
             if isinstance(m, nn.Embedding):
                 nn.init.sparse_(m.weight, 0.01)
-        nn.init.constant_(self.fm_dense_linear.weight, 1.)
+        #nn.init.constant_(self.fm_dense_linear.weight, 1.)
 
     def forward(self, Xi, Xv):
         """
@@ -278,11 +307,12 @@ class DeepFM(nn.Module):
         #self.final_out = torch.stack([torch.sum(f1, 1), torch.sum(f2, 1), torch.sum(deep_out, 1)],dim=1)
         #self.final_out = torch.stack([self.f1, self.f2, self.deep_out], dim=1)
         self.ffw_in = torch.cat([self.f1, self.f2, self.deep_out], dim=1)
-        self.ffw_out = F.relu(self.ffw1(self.ffw_in))
-        if not self.overfitting:
-            self.ffw_out = self.ffw_dn(self.ffw_out)
+        #self.ffw_out = F.relu(self.ffw1(self.ffw_in))
+        #if not self.overfitting:
+        #    self.ffw_out = self.ffw_dn(self.ffw_out)
         #self.check_num(self.ffw_out)
-        total_sum = self.fm_dense_linear(self.ffw_out)
+        #total_sum = self.fm_dense_linear(self.ffw_out)
+        total_sum = self.fm_dense_linear(self.ffw_in)
         return total_sum
 
     def l1_reg(self):
@@ -293,7 +323,7 @@ class DeepFM(nn.Module):
                 reg_loss = reg_loss + torch.sum(torch.abs(param))
             #if 'fm_second_order_embeddings' in varname:
             #    reg_loss = reg_loss + 100000000.0*torch.sum(torch.abs(param))
-        self.last_reg = torch.sum(self.fm_dense_linear.weight)
+        #self.last_reg = torch.sum(self.fm_dense_linear.weight)
         return reg_loss
 
     def smooth_one_hot(self, true_labels, smoothing = 0.0):
@@ -363,6 +393,7 @@ class DeepFM(nn.Module):
         max_avg_score = 99999999
         save_checkpoint = False
         start_checkpoint = 50000
+        fm_dense_reg = torch.zeros(1)
 
         total_loop = 0
         for epoch in range(epochs):
@@ -378,7 +409,7 @@ class DeepFM(nn.Module):
                 #total = torch.softmax(total, dim=1)
                 #err = criterion(total, smooth_label) 
                 err = self.cross_entropy(total, smooth_label)
-                fm_dense_reg = torch.abs(3.0 - self.last_reg)
+                #fm_dense_reg = torch.abs(3.0 - self.last_reg)
                 #loss = err + 1e-8*reg + fm_dense_reg
                 loss = err + 1e-8*reg
                 if not torch.isnan(loss):
