@@ -9,25 +9,31 @@ import random
 import os
 
 from model.DeepFM import DeepFM
-from data.dataset import CriteoDataset
+from data.dataset import CriteoDataset, get_split_dataset, MultipleLoader
 
-def split_train_and_valid(train_data, debug=False):
+def generate_sample_idx(dataset, train_split_ratio=0.8, debug=False):
+    total_set = len(dataset)
+    samples_idx = np.arange(0,total_set)
+    np.random.shuffle(samples_idx)
+    num_train = math.floor(len(samples_idx)*train_split_ratio)
+    num_valid = len(samples_idx) - num_train
+    train_idx = samples_idx[:num_train]
+    valid_idx = samples_idx[num_train:]
+    return train_idx, valid_idx
+
+def split_train_and_valid(pos_dataset, neg_dataset, debug=False):
     if debug:
-        samples_idx = np.arange(0,128)
-        train_idx = samples_idx
-        valid_idx = samples_idx
-        return train_idx, valid_idx
+        samples_idx = np.arange(0,256)
+        pos_idx = samples_idx
+        neg_idx = samples_idx
+        return [pos_idx, neg_idx], [pos_idx, neg_idx]
     else:
-        total_set = len(train_data)
-        samples_idx = np.arange(0,total_set)
-        np.random.shuffle(samples_idx)
-        num_train = math.floor(len(samples_idx)*0.8)
-        num_valid = len(samples_idx) - num_train
-        train_idx = samples_idx[:num_train]
-        valid_idx = samples_idx[num_train:]
-        return train_idx, valid_idx
+        pos_train_idx, pos_valid_idx = generate_sample_idx(pos_dataset)
+        neg_train_idx, neg_valid_idx = generate_sample_idx(neg_dataset)
+        return [pos_train_idx, neg_train_idx], [pos_valid_idx, neg_vallid_idx]
 
 seed = 20170705
+batch_size = 256 // 2
 np.random.seed(seed)
 torch.manual_seed(seed)
 torch.cuda.manual_seed(seed)
@@ -36,20 +42,21 @@ load_model = None
 train_file = "train_large.txt"
 feature_sizes_file = "feature_sizes_large.txt"
 debug = False
-#train_file = "train.txt"
-#feature_sizes_file = "feature_sizes.txt"
-#debug = True
+#`train_file = "train.txt"
+#`feature_sizes_file = "feature_sizes.txt"
+#`debug = True
 
 # load data
-train_data = CriteoDataset('./data', train=True, train_file=train_file)
+pos_dataset, neg_dataset = get_split_dataset('./data', train_file)
+datasets = [pos_dataset, neg_dataset]
 
 # split trani and valid set
-train_idx, valid_idx = split_train_and_valid(train_data, debug)
+train_idx, valid_idx = split_train_and_valid(pos_dataset, neg_dataset, debug)
+loader_train = MultipleLoader([DataLoader(ds, batch_size=batch_size, sampler=sampler.SubsetRandomSampler(s_idx)) for ds, s_idx in zip(datasets, train_idx)], pivot_loader=0)
+
+loader_val = MultipleLoader([DataLoader(ds, batch_size=500, sampler=sampler.SubsetRandomSampler(s_idx)) for ds, s_idx in zip(datasets, valid_idx)], pivot_loader=0)
 
 # loader
-loader_train = DataLoader(train_data, batch_size=256, sampler=sampler.SubsetRandomSampler(train_idx), num_workers=0)
-loader_val = DataLoader(train_data, batch_size=1000, sampler=sampler.SubsetRandomSampler(valid_idx), num_workers=0)
-
 feature_sizes = np.loadtxt('./data/{}'.format(feature_sizes_file), delimiter=',')
 feature_sizes = [int(x) for x in feature_sizes]
 print(feature_sizes)

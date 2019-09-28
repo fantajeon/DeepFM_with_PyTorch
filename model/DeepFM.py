@@ -164,7 +164,7 @@ class PositionalEncoder(nn.Module):
         x = x * math.sqrt(self.d_model)
         #add constant to embedding
         seq_len = x.size(1)
-        x = x + torch.tensor(self.pe[:,:seq_len], requires_grad=False).cuda()
+        x = x + self.pe[:,:seq_len].clone().detach().requires_grad_(True)
         return x
 
 class DeepFM(nn.Module):
@@ -443,20 +443,16 @@ class DeepFM(nn.Module):
             'loss': loss,
             'model_state_dict': self.state_dict()}, checkpoint_file )
    
-    def logloss(self, y, p):
-        p = torch.clamp(p,min=1e-30)
-        p1 = torch.log(p)
-        p2 = torch.log(1.0 - p)
+    def logloss(self, y, p, eps=1e-30):
+        p1 = torch.log(p + eps)
+        p2 = torch.log(1.0 - p + eps)
         L = -(y *p1  + (1.0 - y) *p2).mean()
         #s = (1. + torch.exp(p))
         #L = -(y*torch.log( torch.exp(p) /s ) + (1.-y) *torch.log(1./s)).mean()
         return L
 
     def check_accuracy(self, loader, model):
-        if loader.dataset.train:
-            print('Checking accuracy on validation set')
-        else:
-            print('Checking accuracy on test set')   
+        print('Checking accuracy on validation set')
         num_correct = 0
         num_samples = 0
         model.eval()  # set model to evaluation mode
