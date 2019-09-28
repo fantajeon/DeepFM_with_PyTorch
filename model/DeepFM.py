@@ -285,10 +285,6 @@ class DeepFM(nn.Module):
         self.s1 = s1
         self.s2 = s2
 
-        #self.check_num(xv)
-        #self.check_num(s1)
-        #self.check_num(s2)
-
         """
             deep part
         """
@@ -448,7 +444,10 @@ class DeepFM(nn.Module):
             'model_state_dict': self.state_dict()}, checkpoint_file )
    
     def logloss(self, y, prob):
-        logloss = -(y * torch.log(prob) + (1.0 - y) * torch.log(1.0 - prob)).mean()
+        prob = torch.clamp(prob,min=1e-16)
+        y1 = torch.log(prob)
+        y2 = torch.log(1.0 - prob)
+        logloss = -(y *y1  + (1.0 - y) *y2).mean()
         return logloss
 
     def check_accuracy(self, loader, model):
@@ -467,7 +466,11 @@ class DeepFM(nn.Module):
             total = model(xi, xv)
             cvr = torch.softmax(total,dim=1)
             prob = cvr[:,1]
-            loss = self.logloss(y, prob).item()
+            loss = self.logloss(y, prob)
+            if torch.isnan(loss):
+                print("Valid Bug!")
+                breakpoint()
+            loss = loss.item()
             preds = (torch.argmax(cvr,dim=1)).type(torch.float32)
             num_correct += (preds == y).sum()
             num_samples += preds.size(0)
