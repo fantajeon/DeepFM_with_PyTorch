@@ -393,7 +393,7 @@ class DeepFM(nn.Module):
         fm_dense_reg = torch.zeros(1)
 
         total_loop = 0
-        for epoch in range(epochs):
+        for epoch in tqdm(range(epochs), total=epochs):
             for t, (xi, xv, y) in tqdm(enumerate(loader_train), total=len(loader_train)):
                 total_loop += 1
                 xi = xi.to(device=self.device, dtype=self.dtype)
