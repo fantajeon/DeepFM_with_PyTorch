@@ -11,6 +11,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 from time import time
+from tqdm import tqdm
 
 
 class MultiHeadAttention(nn.Module):
@@ -393,7 +394,7 @@ class DeepFM(nn.Module):
 
         total_loop = 0
         for epoch in range(epochs):
-            for t, (xi, xv, y) in enumerate(loader_train):
+            for t, (xi, xv, y) in tqdm(enumerate(loader_train), total=len(loader_train)):
                 total_loop += 1
                 xi = xi.to(device=self.device, dtype=self.dtype)
                 xv = xv.to(device=self.device, dtype=torch.float32)

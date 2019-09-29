@@ -3,9 +3,12 @@ from torch.utils.data import Dataset
 import pandas as pd
 import numpy as np
 import os
+import random
+import itertools
 
 continous_features = range(0,13)
-categorical_features = range(13,39)
+#categorical_features = range(13,39)
+categorical_features = range(13,65)
 
 class CriteoDataset(Dataset):
     """
@@ -60,27 +63,79 @@ class CriteoDataset(Dataset):
         return os.path.exists(self.root)
 
 class OneLabelDataset(Dataset):
-    def __init__(self, data, target_label):
+    def __init__(self, data, target_label, max_cached = 20000000):
         super(OneLabelDataset, self).__init__()
         self.target_label = target_label
         self.continous_features = continous_features
         self.categorical_features = categorical_features
+        self.data = data
+        self.f = open(self.data['file_path'], 'rb')
+        self.collect()
+        self.cached = {}
+        self.max_cached = max_cached
 
-        data = data[data.iloc[:,-1] == target_label]
-        self.train_data = data.iloc[:, :-1].values
-        self.target = data.iloc[:, -1].values
-    
+    def close(self):
+        self.f.close()
+
+    def collect(self):
+        self.train_data = []
+        for i, (offset, label) in enumerate(zip(self.data['offset'], self.data['label'])):
+            if label == self.target_label:
+                self.train_data.append( offset )
+        self.train_data = torch.tensor(self.train_data, dtype=torch.int64)
+
+    def load_data(self, idx):
+        keys = self.cached.keys()
+        if not idx in self.cached:
+            self.f.seek( self.train_data[idx] )
+            line = self.f.readline().decode('utf-8').rstrip().split(',')
+            feat = [float(f) for f in line]
+            data = torch.tensor(feat, dtype=torch.float32)
+            self.cached[idx] = data
+            if len(self.cached) > self.max_cached:
+                del_idx = random.randint(0,len(keys)-1)
+                key_val = next(itertools.islice(iter(keys),del_idx,None))
+                if key_val != idx:
+                    del self.cached[key_val]
+
+    def to_instance(self, idx):
+        self.load_data(idx)
+        data = self.cached[idx]
+        return data, torch.tensor(self.target_label, dtype=torch.int64)
+
     def __getitem__(self, idx):
-        dataI, targetI = self.train_data[idx, :], self.target[idx]
+        dataI, targetI = self.to_instance(idx)
         Xi = torch.cat([torch.zeros(len(self.continous_features),dtype=torch.int64), torch.tensor(dataI[self.categorical_features], dtype=torch.int64)], dim=0).unsqueeze(-1)
-        Xv = torch.cat([torch.tensor(dataI[self.continous_features],dtype=torch.float32), torch.ones(len(self.categorical_features),dtype=torch.float32)], dim=0).type(torch.float32)
+        Xv = torch.cat([torch.tensor(dataI[self.continous_features],dtype=torch.float32), torch.ones(len(self.categorical_features),dtype=torch.float32)], dim=0)
         return Xi, Xv, targetI
 
     def __len__(self):
         return len(self.train_data)
 
+def build_offset_with_label(large_file_path):
+    offset_dict = []
+    label_dict = []
+    with open(large_file_path, 'rb') as f:
+        while True:
+            offset = f.tell()
+            line = f.readline()
+            if not line:
+                break
+            offset_dict.append(offset)
+            line = line.decode('utf-8').rstrip('\n').split(',')
+            label_dict.append(int(line[-1]))
+    return {'offset': offset_dict, 'label': label_dict, 'file_path': large_file_path}
+
+def test_offset(large_file_path, offset):
+    with open(large_file_path, "rb") as f:
+        for i in range(0,100,10):
+            f.seek( offset[i] )
+            line = f.readline()
+            print("{} - {}".format(i, line))
+        
 def get_split_dataset(root, train_file):
-    data = pd.read_csv(os.path.join(root, train_file), header=None)
+    large_file_path = os.path.join(root, train_file)
+    data = build_offset_with_label(large_file_path)
     pos_dataset = OneLabelDataset(data, 1)
     neg_dataset = OneLabelDataset(data, 0)
     return pos_dataset, neg_dataset
@@ -136,7 +191,7 @@ class MultipleLoader(object):
         return MultipleIter(self)
 
     def __len__(self):
-        return min([len(loader) for loader in self.loaders])
+        return len(self.loaders[self.pivot_loader])
 
     def shuffle_batch(self, batch):
         indices = torch.randperm(len(batch[0]))
