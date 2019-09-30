@@ -226,7 +226,7 @@ class DeepFM(nn.Module):
         """
         all_dims = [self.field_size * self.embedding_size] + self.hidden_dims
         for i in range(1, len(hidden_dims) + 1):
-            setattr(self, "encoder_"+str(i), EncoderLayer(1, self.embedding_size, overfitting=self.overfitting))
+            setattr(self, "encoder_"+str(i), EncoderLayer(2, self.embedding_size, overfitting=self.overfitting))
         self.norm2 = Norm(self.embedding_size)
         self.avg_acc = None
         self.avg_loss = None
@@ -487,8 +487,4 @@ class DeepFM(nn.Module):
             except ZeroDivisionError as e:
                 print(e)
                 return None, None
-
-
-
-
                         

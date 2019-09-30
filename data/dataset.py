@@ -5,6 +5,7 @@ import numpy as np
 import os
 import random
 import itertools
+import linecache
 
 continous_features = range(0,13)
 #categorical_features = range(13,39)
@@ -63,13 +64,14 @@ class CriteoDataset(Dataset):
         return os.path.exists(self.root)
 
 class OneLabelDataset(Dataset):
-    def __init__(self, data, target_label, max_cached = 20000000):
+    def __init__(self, data, target_label, max_cached = 200000):
         super(OneLabelDataset, self).__init__()
         self.target_label = target_label
         self.continous_features = continous_features
         self.categorical_features = categorical_features
         self.data = data
-        self.f = open(self.data['file_path'], 'rb')
+        self.file_path = self.data['file_path']
+        #self.f = open(self.data['file_path'], 'rb')
         self.collect()
         self.cached = {}
         self.max_cached = max_cached
@@ -79,12 +81,28 @@ class OneLabelDataset(Dataset):
 
     def collect(self):
         self.train_data = []
-        for i, (offset, label) in enumerate(zip(self.data['offset'], self.data['label'])):
+        self.nline_data = []
+        for i, (nline, offset, label) in enumerate(zip(self.data['line'], self.data['offset'], self.data['label'])):
             if label == self.target_label:
                 self.train_data.append( offset )
+                self.nline_data.append( nline )
         self.train_data = torch.tensor(self.train_data, dtype=torch.int64)
+        self.nline_data = torch.tensor(self.nline_data, dtype=torch.int64)
+
+    def parse_line(self, line):
+        line = line.rstrip().split(',')
+        feat = [float(f) for f in line]
+        data = torch.tensor(feat, dtype=torch.float32)
+        if data[-1] != self.target_label:
+            breakpoint()
+        return data
 
     def load_data(self, idx):
+        nline = self.nline_data[idx]
+        line = linecache.getline(self.file_path, nline+1)
+        return self.parse_line(line)
+
+    def load_data2(self, idx):
         keys = self.cached.keys()
         if not idx in self.cached:
             self.f.seek( self.train_data[idx] )
@@ -99,8 +117,8 @@ class OneLabelDataset(Dataset):
                     del self.cached[key_val]
 
     def to_instance(self, idx):
-        self.load_data(idx)
-        data = self.cached[idx]
+        data = self.load_data(idx)
+        #data = self.cached[idx]
         return data, torch.tensor(self.target_label, dtype=torch.int64)
 
     def __getitem__(self, idx):
@@ -115,6 +133,8 @@ class OneLabelDataset(Dataset):
 def build_offset_with_label(large_file_path):
     offset_dict = []
     label_dict = []
+    nline_dict = []
+    nline = 0
     with open(large_file_path, 'rb') as f:
         while True:
             offset = f.tell()
@@ -124,7 +144,9 @@ def build_offset_with_label(large_file_path):
             offset_dict.append(offset)
             line = line.decode('utf-8').rstrip('\n').split(',')
             label_dict.append(int(line[-1]))
-    return {'offset': offset_dict, 'label': label_dict, 'file_path': large_file_path}
+            nline_dict.append(nline)
+            nline += 1
+    return {'offset': offset_dict, 'label': label_dict, 'file_path': large_file_path, 'line': nline_dict}
 
 def test_offset(large_file_path, offset):
     with open(large_file_path, "rb") as f:
