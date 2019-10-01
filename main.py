@@ -36,7 +36,7 @@ def split_train_and_valid(pos_dataset, neg_dataset, batch_size, debug=False):
         return [pos_train_idx, neg_train_idx], [pos_valid_idx, neg_valid_idx]
 
 seed = 20170705
-batch_size = 256
+batch_size = 1024
 np.random.seed(seed)
 torch.manual_seed(seed)
 torch.cuda.manual_seed(seed)
@@ -74,6 +74,6 @@ if not load_model is None and os.path.exists(load_model):
     del model_state
 #optimizer = optim.Adam(model.parameters(), lr=1e-4, weight_decay=0.0)
 #optimizer = radam.RAdam(model.parameters(), lr=1e-3, betas=(0.9, 0.999), weight_decay=1e-4)
-#optimizer = radam.AdamW(model.parameters(), lr=1e-3, warmup=10000, betas=(0.9, 0.999), weight_decay=1e-6)
-optimizer = radam.RAdamW(model.parameters(), lr=1e-3, warmup=100, betas=(0.9, 0.999))
+optimizer = radam.AdamW(model.parameters(), lr=1e-2, warmup=10000 if not debug else 100, betas=(0.9, 0.999), weight_decay=1e-6, warmup_lr=1e-8)
+#optimizer = radam.RAdamW(model.parameters(), lr=1e-3, warmup=10000 if not debug else 100, betas=(0.9, 0.999))
 model.fit(loader_train, loader_val, optimizer, epochs=1000, verbose=True, print_every=1000, checkpoint_dir="./chkp")

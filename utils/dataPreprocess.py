@@ -78,9 +78,9 @@ class ContinuousFeatureGenerator:
         min_v = self.min_val[idx]
         max_v = self.max_val[idx]
         if val == '':
-            return 0.5*(max_v + min_v)
+            return 0
         eps = 1e-6
-        val = (float(val) - min_v) / (max_v - min_v + eps)
+        val = 2.0*((float(val) - min_v) / (max_v - min_v + eps) - 0.5)
         return val
 
 

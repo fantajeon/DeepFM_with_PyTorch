@@ -183,7 +183,7 @@ class DeepFM(nn.Module):
     """
 
     def __init__(self, feature_sizes, embedding_size=8,
-                 hidden_dims=[200,200,200,200,200],
+                 hidden_dims=[200,200,200],
                  dropout=[0.5, 0.5, 0.5], 
                  
                  use_cuda=True, verbose=False, overfitting=False):
@@ -226,7 +226,7 @@ class DeepFM(nn.Module):
         """
         all_dims = [self.field_size * self.embedding_size] + self.hidden_dims
         for i in range(1, len(hidden_dims) + 1):
-            setattr(self, "encoder_"+str(i), EncoderLayer(2, self.embedding_size, overfitting=self.overfitting))
+            setattr(self, "encoder_"+str(i), EncoderLayer(2, self.embedding_size, dropout=0., overfitting=self.overfitting))
         self.norm2 = Norm(self.embedding_size)
         self.avg_acc = None
         self.avg_loss = None
@@ -236,7 +236,7 @@ class DeepFM(nn.Module):
         self.merge_linear = nn.ModuleList( [nn.Linear(num_f1,self.output_dim), nn.Linear(num_f2, self.output_dim), nn.Linear(self.field_size*self.embedding_size, self.output_dim)] )
 
         num_ffw = self.output_dim * 3
-        self.fm_dense_linear = ClassificationLayer(num_ffw, 2, dropout=0.1, overfitting=self.overfitting)
+        self.fm_dense_linear = ClassificationLayer(num_ffw, 2, dropout=0.0, overfitting=self.overfitting)
         self.pe = PositionalEncoder(self.embedding_size, max_seq_len=self.field_size)
         self.init_weight()
 
@@ -250,10 +250,10 @@ class DeepFM(nn.Module):
             if isinstance(m, nn.Linear):
                 nn.init.kaiming_normal_(m.weight, mode='fan_in')
                 nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.BatchNorm1d):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
-            if isinstance(m, nn.Embedding):
+            #elif isinstance(m, nn.BatchNorm1d):
+            #    nn.init.constant_(m.weight, 1)
+            #    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Embedding):
                 nn.init.sparse_(m.weight, 0.01)
         #nn.init.constant_(self.fm_dense_linear.weight, 1.)
 
@@ -338,7 +338,7 @@ class DeepFM(nn.Module):
             true_dist.scatter_(1, true_labels.data.unsqueeze(1), confidence)
         return true_dist
 
-    def cross_entropy(self, _input, target, size_average=True):
+    def cross_entropy(self, _input, target, weight, size_average=True, estimate=False):
         """ Cross entropy that accepts soft targets
         Args:
              pred: predictions for neural network
@@ -356,10 +356,20 @@ class DeepFM(nn.Module):
             loss.backward()
         """
         _input = F.log_softmax(_input,dim=1)
+        if estimate:
+            return -(target*_input).sum(dim=-1)
+        l = -weight*(target*_input).sum(dim=-1)
         if size_average:
-            return torch.mean(torch.sum(-target * _input, dim=1))
+            return torch.mean(l)
         else:
-            return torch.sum(torch.sum(-target * _input, dim=1))
+            return torch.sum(l)
+
+    def step_decay(self, epoch, lr):
+        # initial_lrate = 1.0 # no longer needed
+        drop = 0.5
+        epochs_drop = 2.0
+        lrate = lr * math.pow(drop, math.floor((1+epoch)/epochs_drop))
+        return lrate
 
     def fit(self, loader_train, loader_val, optimizer, epochs=1, verbose=False, print_every=100, checkpoint_dir="./chkp"):
         """
@@ -402,10 +412,17 @@ class DeepFM(nn.Module):
                 
                 total = model(xi, xv)
                 reg = self.l1_reg().to(device=self.device, dtype=torch.float32)
-                smooth_label = self.smooth_one_hot(y, 0.0001)
+                smooth_label = self.smooth_one_hot(y, self.step_decay(epoch, 1e-4))
                 #total = torch.softmax(total, dim=1)
                 #err = criterion(total, smooth_label) 
-                err = self.cross_entropy(total, smooth_label)
+                with torch.no_grad():
+                    ss = self.cross_entropy(total, smooth_label, weight=None, estimate=True)
+                    p = ss/ss.max()
+                    #weight = torch.zeros( p.size(), dtype=torch.float32, device=self.device )
+                    #weight[(p<0.5)] = 1
+                    #weight = torch.ones( p.size(), dtype=torch.float32, device=self.device )
+                    weight = p
+                err = self.cross_entropy(total, smooth_label, weight=weight, estimate=False)
                 #fm_dense_reg = torch.abs(3.0 - self.last_reg)
                 #loss = err + 1e-8*reg + fm_dense_reg
                 loss = err + 1e-8*reg
