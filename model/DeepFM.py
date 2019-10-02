@@ -81,15 +81,10 @@ class FeedForward(nn.Module):
         self.d_ff = d_ff
         self.linear_1 = nn.Linear(d_model, d_ff)
         self.dropout = nn.Dropout(dropout)
-        self.bn = nn.BatchNorm1d(d_ff)
         self.linear_2 = nn.Linear(d_ff, d_model)
 
     def forward(self, x):
-        x1 = self.linear_1(x)
-        if x1.dim() == 3:
-            x1 = F.relu(self.bn( x1.transpose(1,2) ).transpose(1,2))
-        else:
-            x1 = F.relu(self.bn( x1 ))
+        x1 = F.relu(self.linear_1(x))
         if not self.overfitting:
             x1 = self.dropout(x1)
         x = self.linear_2(x1)
@@ -183,7 +178,7 @@ class DeepFM(nn.Module):
     """
 
     def __init__(self, feature_sizes, embedding_size=8,
-                 hidden_dims=[200,200,200],
+                 hidden_dims=[200],
                  dropout=[0.5, 0.5, 0.5], 
                  
                  use_cuda=True, verbose=False, overfitting=False):
@@ -204,7 +199,7 @@ class DeepFM(nn.Module):
         self.embedding_size = embedding_size
         self.hidden_dims = hidden_dims
         self.dtype = torch.long
-        self.output_dim = 4
+        self.output_dim = 2
         self.overfitting = overfitting
         #self.bias = torch.nn.Parameter(torch.zeros(1, dtype=torch.float32))
         """
@@ -226,7 +221,7 @@ class DeepFM(nn.Module):
         """
         all_dims = [self.field_size * self.embedding_size] + self.hidden_dims
         for i in range(1, len(hidden_dims) + 1):
-            setattr(self, "encoder_"+str(i), EncoderLayer(2, self.embedding_size, dropout=0., overfitting=self.overfitting))
+            setattr(self, "encoder_"+str(i), EncoderLayer(2, self.embedding_size, dropout=0.5, overfitting=self.overfitting))
         self.norm2 = Norm(self.embedding_size)
         self.avg_acc = None
         self.avg_loss = None
@@ -236,7 +231,7 @@ class DeepFM(nn.Module):
         self.merge_linear = nn.ModuleList( [nn.Linear(num_f1,self.output_dim), nn.Linear(num_f2, self.output_dim), nn.Linear(self.field_size*self.embedding_size, self.output_dim)] )
 
         num_ffw = self.output_dim * 3
-        self.fm_dense_linear = ClassificationLayer(num_ffw, 2, dropout=0.0, overfitting=self.overfitting)
+        self.fm_dense_linear = ClassificationLayer(num_ffw, 2, dropout=0.05, overfitting=self.overfitting)
         self.pe = PositionalEncoder(self.embedding_size, max_seq_len=self.field_size)
         self.init_weight()
 
@@ -297,19 +292,20 @@ class DeepFM(nn.Module):
         #self.check_num(deep_out)
         deep_out = torch.flatten(deep_out, start_dim=1)
 
-        self.f1 = self.merge_linear[0](f1)
-        self.f2 = self.merge_linear[1](f2)
-        self.deep_out = self.merge_linear[2](deep_out.squeeze(1))
+        self.f1 = self.merge_linear[0](f1).unsqueeze(dim=1)
+        self.f2 = self.merge_linear[1](f2).unsqueeze(dim=1)
+        self.deep_out = self.merge_linear[2](deep_out.squeeze(1)).unsqueeze(dim=1)
         #total_sum = torch.sum(f1, 1) + torch.sum(f2, 1) + torch.sum(deep_out, 1) + self.bias
         #self.final_out = torch.stack([torch.sum(f1, 1), torch.sum(f2, 1), torch.sum(deep_out, 1)],dim=1)
         #self.final_out = torch.stack([self.f1, self.f2, self.deep_out], dim=1)
         self.ffw_in = torch.cat([self.f1, self.f2, self.deep_out], dim=1)
+        total_sum = self.ffw_in.sum(dim=1)
         #self.ffw_out = F.relu(self.ffw1(self.ffw_in))
         #if not self.overfitting:
         #    self.ffw_out = self.ffw_dn(self.ffw_out)
         #self.check_num(self.ffw_out)
         #total_sum = self.fm_dense_linear(self.ffw_out)
-        total_sum = self.fm_dense_linear(self.ffw_in)
+        #total_sum = self.fm_dense_linear(self.ffw_in)
         return total_sum
 
     def l1_reg(self):
@@ -412,7 +408,7 @@ class DeepFM(nn.Module):
                 
                 total = model(xi, xv)
                 reg = self.l1_reg().to(device=self.device, dtype=torch.float32)
-                smooth_label = self.smooth_one_hot(y, self.step_decay(epoch, 1e-4))
+                smooth_label = self.smooth_one_hot(y, self.step_decay(epoch, 1e-2))
                 #total = torch.softmax(total, dim=1)
                 #err = criterion(total, smooth_label) 
                 with torch.no_grad():
@@ -449,21 +445,24 @@ class DeepFM(nn.Module):
                     model.train()
 
                     if total_loop > start_checkpoint and save_checkpoint:
-                        self.save_model(epoch, loss.item(), checkpoint_dir, "best.pth")
+                        self.save_model(epoch, max_avg_score, loss.item(), checkpoint_dir, "best.pth")
                         save_checkpoint = False
                 if total_loop > start_checkpoint and t%100000 == 0:
-                    self.save_model(epoch, loss.item(), checkpoint_dir, "model.pth")
+                    self.save_model(epoch, max_avg_score, loss.item(), checkpoint_dir, "model.pth")
 
                     
-    def save_model(self, epoch, loss, checkpoint_dir, filename):
+    def save_model(self, epoch, best_score, loss, checkpoint_dir, filename):
         checkpoint_file = os.path.join( checkpoint_dir, filename )
         torch.save( {'epoch': epoch,
             'loss': loss,
+            'best_score': best_score,
             'model_state_dict': self.state_dict()}, checkpoint_file )
    
-    def logloss(self, y, p, eps=1e-30):
-        p1 = torch.log(p + eps)
-        p2 = torch.log(1.0 - p + eps)
+    def logloss(self, y, p, eps=1e-15):
+        y = y.cpu().type(torch.float64)
+        cp = p.cpu().type(torch.float64).clamp(min=eps,max=(1.-eps))
+        p1 = torch.log(cp)
+        p2 = torch.log(1.0 - cp)
         L = -(y *p1  + (1.0 - y) *p2).mean()
         #s = (1. + torch.exp(p))
         #L = -(y*torch.log( torch.exp(p) /s ) + (1.-y) *torch.log(1./s)).mean()

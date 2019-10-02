@@ -10,7 +10,7 @@ from model.DeepFM import DeepFM
 from data.dataset import CriteoDataset
 from tqdm import tqdm
 
-batch_size = 32
+batch_size = 128
 test_file = "test_large.txt"
 feature_sizes_file = "feature_sizes_large.txt"
 #checkpoint_dir = "./chkp/model.pth"
@@ -36,7 +36,7 @@ model.load_state_dict( model_state['model_state_dict'] )
 model.eval()
 
 
-print("loaded with loss={}, epoch={}".format(model_state['loss'], model_state['epoch']))
+print("loaded with loss={}, best_score={}, epoch={}".format(model_state['loss'], model_state['best_score'], model_state['epoch']))
 print("num_batches:", len(loader_test))
 with torch.no_grad():
     b0 = 60000000

@@ -276,8 +276,8 @@ class AdamW(Optimizer):
                 bias_correction2 = 1 - beta2 ** state['step']
                 
                 if group['warmup'] > state['step']:
-                    #scheduled_lr = 1e-8 + state['step'] * group['lr'] / group['warmup']
-                    scheduled_lr = group['warmup_lr']
+                    scheduled_lr = 1e-8 + state['step'] * group['lr'] / group['warmup']
+                    #scheduled_lr = group['warmup_lr']
                 else:
                     scheduled_lr = group['lr']
 
